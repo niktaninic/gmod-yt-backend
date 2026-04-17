@@ -1,0 +1,15 @@
+services:
+  yt-converter:
+    build: .
+    container_name: yt-converter
+    restart: unless-stopped
+    ports:
+      - "9999:9999"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./cache:/app/cache
+      - ./cookies:/app/cookies  # not :ro, yt-dlp writes back to cookies
+    environment:
+      - COOKIES_FILE=/app/cookies/cookies.txt
