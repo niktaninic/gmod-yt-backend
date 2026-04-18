@@ -35,11 +35,25 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     expires_at TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS spotify_cache (
+    track_id TEXT PRIMARY KEY,
+    video_id TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    artist TEXT NOT NULL DEFAULT '',
+    duration INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
 `);
 
+// old dbs wont have this yet
+try {
+  db.exec("ALTER TABLE history ADD COLUMN source TEXT NOT NULL DEFAULT 'youtube'");
+} catch (_) {}
+
 const stmtInsertHistory = db.prepare(`
-  INSERT INTO history (video_id, title, duration, nick, steamid, server_ip, cached)
-  VALUES (?, ?, ?, ?, ?, ?, ?)
+  INSERT INTO history (video_id, title, duration, nick, steamid, server_ip, cached, source)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 const stmtRecentHistory = db.prepare(`
@@ -48,12 +62,12 @@ const stmtRecentHistory = db.prepare(`
   LIMIT 1
 `);
 
-function addHistory({ videoId, title, duration, nick, steamid, serverIp, cached }) {
-  // dedup: same video within 60s = skip
+function addHistory({ videoId, title, duration, nick, steamid, serverIp, cached, source }) {
+  // same video spam within 60s is just noise
   const recent = stmtRecentHistory.get(videoId);
   if (recent) return;
 
-  stmtInsertHistory.run(videoId, title || '', duration || 0, nick || '', steamid || '', serverIp || '', cached ? 1 : 0);
+  stmtInsertHistory.run(videoId, title || '', duration || 0, nick || '', steamid || '', serverIp || '', cached ? 1 : 0, source || 'youtube');
 }
 
 const stmtGetHistory = db.prepare(`
@@ -93,6 +107,20 @@ function getExpiredCacheEntries() {
   return stmtExpiredCache.all();
 }
 
+const stmtGetSpotify = db.prepare(`SELECT * FROM spotify_cache WHERE track_id = ?`);
+const stmtSetSpotify = db.prepare(`
+  INSERT OR REPLACE INTO spotify_cache (track_id, video_id, title, artist, duration)
+  VALUES (?, ?, ?, ?, ?)
+`);
+
+function getSpotifyCache(trackId) {
+  return stmtGetSpotify.get(trackId) || null;
+}
+
+function setSpotifyCache({ trackId, videoId, title, artist, duration }) {
+  stmtSetSpotify.run(trackId, videoId, title || '', artist || '', duration || 0);
+}
+
 module.exports = {
   db,
   addHistory,
@@ -101,4 +129,6 @@ module.exports = {
   setCacheEntry,
   deleteCacheEntry,
   getExpiredCacheEntries,
+  getSpotifyCache,
+  setSpotifyCache,
 };

@@ -1,6 +1,6 @@
 FROM node:20-slim
 
-# yt-dlp + ffmpeg + curl_cffi (for --impersonate). build deps get purged after pip install
+# curl_cffi is here for yt-dlp impersonate stuff. build deps get tossed after install
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \

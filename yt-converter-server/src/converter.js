@@ -7,7 +7,7 @@ if (!fs.existsSync(config.cacheDir)) {
   fs.mkdirSync(config.cacheDir, { recursive: true });
 }
 
-// yt-dlp needs write access to cookies, so we work on a copy
+// yt-dlp wants a writable cookies file, so use a temp copy
 const writableCookiesPath = path.join(config.cacheDir, '.cookies_tmp.txt');
 
 function getWritableCookiesPath() {
@@ -21,7 +21,7 @@ function getWritableCookiesPath() {
   }
 }
 
-// pick whatever chrome target is available for --impersonate
+// grab any chrome-ish target yt-dlp exposes
 let impersonateTarget = null;
 try {
   const targets = execFileSync('yt-dlp', ['--list-impersonate-targets'], { timeout: 10000 }).toString();
@@ -41,42 +41,25 @@ try {
   console.log(`node available for yt-dlp js solving: ${nodeVersion}`);
 } catch (_) {}
 
-function extractVideoId(url) {
-  const patterns = [
-    /(?:youtube\.com\/watch\?.*v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/v\/)([a-zA-Z0-9_-]{11})/,
-    /^([a-zA-Z0-9_-]{11})$/,
-  ];
-  for (const p of patterns) {
-    const m = url.match(p);
-    if (m) return m[1];
-  }
-  return null;
+function buildBaseArgs(opts) {
+  const args = [];
+  if (!opts || !opts.allowPlaylist) args.push('--no-playlist');
+  args.push('--js-runtimes', 'node');
+
+  const cookiesPath = getWritableCookiesPath();
+  if (cookiesPath) args.push('--cookies', cookiesPath);
+  if (impersonateTarget) args.push('--impersonate', impersonateTarget);
+
+  return args;
 }
 
 function getVideoInfo(videoId) {
   return new Promise((resolve, reject) => {
-    const args = [
-      '--dump-json',
-      '--no-download',
-      '--no-playlist',
-      '--js-runtimes', 'node',
-    ];
-
-    const cookiesPath = getWritableCookiesPath();
-    if (cookiesPath) {
-      args.push('--cookies', cookiesPath);
-    }
-
-    if (impersonateTarget) {
-      args.push('--impersonate', impersonateTarget);
-    }
-
+    const args = ['--dump-json', '--no-download', ...buildBaseArgs()];
     args.push(`https://www.youtube.com/watch?v=${videoId}`);
 
     execFile('yt-dlp', args, { timeout: 30000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err) {
-        return reject(new Error(`yt-dlp info failed: ${stderr || err.message}`));
-      }
+      if (err) return reject(new Error(`yt-dlp info failed: ${stderr || err.message}`));
       try {
         resolve(JSON.parse(stdout));
       } catch (e) {
@@ -90,57 +73,25 @@ function downloadAudio(videoId) {
   return new Promise((resolve, reject) => {
     const outputPath = path.join(config.cacheDir, `${videoId}.mp3`);
 
-    // race condition guard
-    if (fs.existsSync(outputPath)) {
-      return resolve(outputPath);
-    }
+    // someone else might have finished first
+    if (fs.existsSync(outputPath)) return resolve(outputPath);
 
     const tmpPath = path.join(config.cacheDir, `${videoId}.tmp.mp3`);
-
-    const args = [
-      '-x',
-      '--audio-format', 'mp3',
-      '--audio-quality', '2',
-      '--no-playlist',
-      '--js-runtimes', 'node',
-      '-o', tmpPath,
-    ];
-
-    const cookiesPath = getWritableCookiesPath();
-    if (cookiesPath) {
-      args.push('--cookies', cookiesPath);
-    }
-
-    if (impersonateTarget) {
-      args.push('--impersonate', impersonateTarget);
-    }
-
+    const args = ['-x', '--audio-format', 'mp3', '--audio-quality', '2', ...buildBaseArgs(), '-o', tmpPath];
     args.push(`https://www.youtube.com/watch?v=${videoId}`);
 
     execFile('yt-dlp', args, { timeout: 120000, maxBuffer: 5 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) {
-          try { fs.unlinkSync(tmpPath); } catch (_) {}
+        try { fs.unlinkSync(tmpPath); } catch (_) {}
         return reject(new Error(`yt-dlp download failed: ${stderr || err.message}`));
       }
 
-      // yt-dlp sometimes writes with a different extension before converting
-      const possibleFiles = [tmpPath];
+      // yt-dlp can leave weird temp ext names behind
       const tmpBase = tmpPath.replace(/\.tmp\.mp3$/, '.tmp');
-      for (const ext of ['.mp3', '.m4a', '.webm', '.opus']) {
-        possibleFiles.push(tmpBase + ext);
-      }
+      const possibleFiles = [tmpPath, ...(['.mp3', '.m4a', '.webm', '.opus'].map(ext => tmpBase + ext))];
 
-      let foundFile = null;
-      for (const f of possibleFiles) {
-        if (fs.existsSync(f)) {
-          foundFile = f;
-          break;
-        }
-      }
-
-      if (!foundFile) {
-        return reject(new Error('Downloaded file not found'));
-      }
+      const foundFile = possibleFiles.find(f => fs.existsSync(f));
+      if (!foundFile) return reject(new Error('Downloaded file not found'));
 
       try {
         fs.renameSync(foundFile, outputPath);
@@ -153,8 +104,59 @@ function downloadAudio(videoId) {
   });
 }
 
+function searchYouTube(query) {
+  return new Promise((resolve, reject) => {
+    const args = ['--dump-json', '--no-download', ...buildBaseArgs()];
+    args.push(`ytsearch1:${query}`);
+
+    execFile('yt-dlp', args, { timeout: 30000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) return reject(new Error(`YouTube search failed: ${stderr || err.message}`));
+      try {
+        const data = JSON.parse(stdout);
+        if (!data.id) return reject(new Error('No YouTube results found'));
+        resolve({
+          videoId: data.id,
+          title: data.title || '',
+          duration: Math.floor(data.duration || 0),
+        });
+      } catch (e) {
+        reject(new Error('Failed to parse YouTube search results'));
+      }
+    });
+  });
+}
+
+function getPlaylistItems(url) {
+  return new Promise((resolve, reject) => {
+    const args = ['--flat-playlist', '--dump-json', '--no-download', ...buildBaseArgs({ allowPlaylist: true })];
+    args.push(url);
+
+    execFile('yt-dlp', args, { timeout: 60000, maxBuffer: 50 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) return reject(new Error(`yt-dlp playlist failed: ${stderr || err.message}`));
+      try {
+        const items = stdout.trim().split('\n')
+          .filter(line => line.trim())
+          .map(line => {
+            const entry = JSON.parse(line);
+            return {
+              videoId: entry.id,
+              title: entry.title || '',
+              duration: Math.floor(entry.duration || 0),
+            };
+          })
+          .filter(item => item.videoId);
+        if (items.length === 0) return reject(new Error('Empty playlist'));
+        resolve(items);
+      } catch (e) {
+        reject(new Error('Failed to parse yt-dlp playlist output'));
+      }
+    });
+  });
+}
+
 module.exports = {
-  extractVideoId,
   getVideoInfo,
   downloadAudio,
+  searchYouTube,
+  getPlaylistItems,
 };

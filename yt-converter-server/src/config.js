@@ -12,6 +12,8 @@ const config = {
   rateLimitWindowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS, 10) || 60000,
   rateLimitMax: parseInt(process.env.RATE_LIMIT_MAX, 10) || 10,
   cookiesFile: process.env.COOKIES_FILE || './cookies/cookies.txt',
+  spotifyClientId: process.env.SPOTIFY_CLIENT_ID || '',
+  spotifyClientSecret: process.env.SPOTIFY_CLIENT_SECRET || '',
   cacheDir: path.join(__dirname, '..', 'cache'),
   dbPath: path.join(__dirname, '..', 'data', 'history.db'),
 };

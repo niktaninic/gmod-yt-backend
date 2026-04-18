@@ -1,111 +1,116 @@
 # gmod-yt-backend
 
-YouTube → MP3 for GMod 3D Stream Radio. yt-dlp does the heavy lifting, express serves the files.
+backend + addon patch files for 3D Stream Radio.
+server lives in `yt-converter-server/`.
+changed addon files live in `3d-stream-radio-master/lua/`.
 
-## run it
+## run
 
-### docker (recommended)
+docker:
 
 ```bash
-cp .env.example .env   # set API_SECRET
-mkdir -p cookies       # optional: drop cookies.txt here (netscape format)
+cd yt-converter-server
+cp .env.example .env
+mkdir -p cookies
 docker compose up -d --build
 ```
 
-### bare metal
-
-need: node 18+, python3, yt-dlp, ffmpeg, curl_cffi
+bare metal:
 
 ```bash
+cd yt-converter-server
 npm install
 pip install "yt-dlp[default]" curl_cffi
 cp .env.example .env
 npm run dev
 ```
 
+needs: node 18+, python3, yt-dlp, ffmpeg, curl_cffi
+
+fill `.env` before you start it if you want anything except the most basic youtube path.
+
 ## auth
 
-protected endpoints need `X-SR-Key` header matching `API_SECRET` from `.env`.
+send `X-SR-Key` with the same secret as `API_SECRET`.
 
-also supports `X-SR-Test: 1` (dev only, default secret) and legacy HMAC (`X-SR-Signature` + `X-SR-Timestamp`).
+`X-SR-Test: 1` still works, but only with the default dev secret. dont leave that in prod.
 
-## endpoints
+## api
 
-### `POST /api/convert` (auth + rate limit)
+`POST /api/convert`
+convert one track and return relative `stream_url`.
 
-body:
-```json
-{
-  "url": "https://youtube.com/watch?v=dQw4w9WgXcQ",
-  "nick": "PlayerName",
-  "steamid": "STEAM_0:1:12345",
-  "server_ip": "192.168.21.37:27015"
-}
+`POST /api/info`
+metadata only, no download.
+
+`POST /api/playlist`
+playlist metadata only. first track still gets converted on addon side when playback starts.
+
+`GET /stream/:filename`
+serves cached mp3, range requests work.
+
+`GET /api/history`
+recent conversions.
+
+`GET /api/health`
+basic alive check.
+
+## gmod side
+
+copy files from `3d-stream-radio-master/lua/` into the addon.
+that folder only keeps changed files now.
+
+use these convars:
+
+```cfg
+sv_streamradio_converter_url "http://example.com:9999"
+sv_streamradio_converter_secret "your_api_secret"
+sv_streamradio_yt_debug 1
+sv_streamradio_spotify_debug 1
 ```
 
-only `url` is required. rest is for history.
-
-response:
-```json
-{
-  "success": true,
-  "stream_url": "/stream/dQw4w9WgXcQ.mp3",
-  "video_id": "dQw4w9WgXcQ",
-  "title": "Rick Astley - Never Gonna Give You Up",
-  "duration": 212,
-  "cached": true
-}
-```
-
-`stream_url` is relative — prepend the server base url.
-
-errors: 400 (bad url, too long), 401, 429, 500
-
-### `POST /api/info` (auth + rate limit)
-
-video metadata without converting. body: `{ "url": "..." }`
-
-### `GET /api/history?page=1&limit=50` (public)
-
-conversion history, paginated.
-
-### `GET /api/health` (public)
-
-`{ "status": "ok", "uptime": 3621.5 }`
-
-### `GET /stream/:videoId.mp3` (public)
-
-serves cached mp3s. supports range requests (seeking). 404 if not converted yet.
-
-## gmod setup
-
-only one file is changed in the 3D Stream Radio addon: `lua/streamradio_core/interfaces/youtube.lua`. just replace the original with the one from this repo.
-
-```
-sv_streamradio_yt_converter_url "http://example.com:9999"
-sv_streamradio_yt_converter_secret "your_api_secret"
-sv_streamradio_yt_debug 1  -- optional
-```
+spotify playlist/track stuff also needs `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` in `.env`.
 
 ## cookies
 
-yt-dlp `--impersonate` handles most blocks but real cookies are more reliable. export from browser in netscape format → `cookies/cookies.txt`
+drop netscape-format cookies into `yt-converter-server/cookies/cookies.txt` if youtube starts acting up.
 
-## what can break
+## what breaks
 
-- yt-dlp gets outdated → youtube changes their api → `pip install -U yt-dlp` inside the container
-- cookies expire → re-export from browser
-- curl_cffi breaks on update → rebuild docker image
-- video over 10min (configurable via `MAX_DURATION_SECONDS` in `.env`)
+- yt-dlp gets old, youtube changes something, everything goes sideways
+- cookies expire
+- curl_cffi or yt-dlp updates can break impersonate stuff
+- long tracks get rejected if they pass `MAX_DURATION_SECONDS`
+- spotify needs valid client creds or that path is dead
 
-## .env
+## env
 
-| var | default | what |
-|-----|---------|------|
-| `PORT` | `9999` | server port |
-| `API_SECRET` | — | shared key, same as gmod convar |
-| `CACHE_DAYS` | `30` | mp3 cache lifetime |
-| `MAX_DURATION_SECONDS` | `600` | reject longer videos |
-| `RATE_LIMIT_WINDOW_MS` | `60000` | rate limit window |
-| `RATE_LIMIT_MAX` | `10` | max requests per window |
-| `COOKIES_FILE` | `./cookies/cookies.txt` | yt cookies path |
+`PORT`
+default `9999`
+
+`API_SECRET`
+shared key for the addon
+
+`BASE_URL`
+optional. backend mostly works without it right now
+
+`CACHE_DAYS`
+how long mp3s stay around
+
+`MAX_DURATION_SECONDS`
+hard cutoff for track length
+
+`RATE_LIMIT_WINDOW_MS`
+rate limit window
+
+`RATE_LIMIT_MAX`
+max hits per window
+
+`SPOTIFY_CLIENT_ID`
+needed for spotify track + playlist support
+
+`SPOTIFY_CLIENT_SECRET`
+same deal
+
+`COOKIES_FILE`
+path to cookies file

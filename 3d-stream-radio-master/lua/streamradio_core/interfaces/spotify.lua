@@ -4,8 +4,8 @@ if not istable(RADIOIFACE) then
 	return
 end
 
-RADIOIFACE.name = "YouTube"
-RADIOIFACE.priority = -10000
+RADIOIFACE.name = "Spotify"
+RADIOIFACE.priority = -10001
 RADIOIFACE.online = true
 RADIOIFACE.cache = false
 
@@ -14,66 +14,66 @@ RADIOIFACE.downloadFirst = false
 RADIOIFACE.allowCaching = true
 
 local g_cvDebug = CreateConVar(
-	"sv_streamradio_yt_debug",
+	"sv_streamradio_spotify_debug",
 	"0",
 	bit.bor(FCVAR_ARCHIVE, FCVAR_GAMEDLL, FCVAR_REPLICATED),
-	"Enable YouTube converter debug logging (0 = off, 1 = on)"
+	"Enable Spotify converter debug logging (0 = off, 1 = on)"
 )
 
 local function DebugLog(...)
 	if not g_cvDebug:GetBool() then return end
-	MsgN("[StreamRadio YT] ", ...)
+	MsgN("[StreamRadio Spotify] ", ...)
 end
 
 -- survives lua hot reload
-StreamRadioLib._ytResultCache = StreamRadioLib._ytResultCache or {}
-StreamRadioLib._ytPendingCallbacks = StreamRadioLib._ytPendingCallbacks or {}
+StreamRadioLib._spotifyResultCache = StreamRadioLib._spotifyResultCache or {}
+StreamRadioLib._spotifyPendingCallbacks = StreamRadioLib._spotifyPendingCallbacks or {}
 
-local g_resultCache = StreamRadioLib._ytResultCache
-local g_pendingCallbacks = StreamRadioLib._ytPendingCallbacks
+local g_resultCache = StreamRadioLib._spotifyResultCache
+local g_pendingCallbacks = StreamRadioLib._spotifyPendingCallbacks
 local RESULT_CACHE_TTL = 300
 
-local function GetCachedResult(videoId)
-	local entry = g_resultCache[videoId]
+local function GetCachedResult(trackId)
+	local entry = g_resultCache[trackId]
 	if not entry then return nil end
 	if CurTime() - entry.time > RESULT_CACHE_TTL then
-		g_resultCache[videoId] = nil
+		g_resultCache[trackId] = nil
 		return nil
 	end
 	return entry.streamUrl
 end
 
-local function SetCachedResult(videoId, streamUrl)
-	g_resultCache[videoId] = {
+local function SetCachedResult(trackId, streamUrl)
+	g_resultCache[trackId] = {
 		streamUrl = streamUrl,
 		time = CurTime(),
 	}
 end
 
-local function ResolvePending(videoId, success, streamUrl, errorCode)
-	local pending = g_pendingCallbacks[videoId]
-	g_pendingCallbacks[videoId] = nil
+local function ResolvePending(trackId, success, streamUrl, errorCode)
+	local pending = g_pendingCallbacks[trackId]
+	g_pendingCallbacks[trackId] = nil
 	if not pending then return end
 	for _, entry in ipairs(pending) do
 		entry.callback(entry.selfRef, success, streamUrl, errorCode)
 	end
 end
 
-local ERROR_CONVERTER_UNAVAILABLE = 110000
-local ERROR_CONVERTER_FAILED = 110001
-local ERROR_CONVERTER_TOO_LONG = 110002
-local ERROR_CONVERTER_INVALID_URL = 110003
-local ERROR_CONVERTER_RATE_LIMITED = 110004
+local ERROR_CONVERTER_UNAVAILABLE = 120000
+local ERROR_CONVERTER_FAILED = 120001
+local ERROR_CONVERTER_TOO_LONG = 120002
+local ERROR_CONVERTER_INVALID_URL = 120003
+local ERROR_CONVERTER_RATE_LIMITED = 120004
 
 StreamRadioLib.Error.AddStreamErrorCode({
 	id = ERROR_CONVERTER_UNAVAILABLE,
-	name = "STREAM_ERROR_YT_CONVERTER_UNAVAILABLE",
-	description = "[YouTube] Converter server is not configured or unreachable",
+	name = "STREAM_ERROR_SPOTIFY_CONVERTER_UNAVAILABLE",
+	description = "[Spotify] Converter server is not configured or unreachable",
 	helptext = [[
 The converter server is not configured or cannot be reached.
 
 Server admin needs to:
-	1. Set up the yt-converter-server
+	1. Set up the yt-converter-server with Spotify credentials
 	2. Set sv_streamradio_converter_url to the server URL
 	3. Set sv_streamradio_converter_secret to the shared API secret
 ]],
@@ -81,37 +81,37 @@ Server admin needs to:
 
 StreamRadioLib.Error.AddStreamErrorCode({
 	id = ERROR_CONVERTER_FAILED,
-	name = "STREAM_ERROR_YT_CONVERTER_FAILED",
-	description = "[YouTube] Conversion failed",
+	name = "STREAM_ERROR_SPOTIFY_CONVERTER_FAILED",
+	description = "[Spotify] Conversion failed",
 	helptext = [[
-The YouTube converter server failed to convert the video.
+The converter server failed to convert the Spotify track.
 This could be a temporary issue. Try again later.
 ]],
 })
 
 StreamRadioLib.Error.AddStreamErrorCode({
 	id = ERROR_CONVERTER_TOO_LONG,
-	name = "STREAM_ERROR_YT_CONVERTER_TOO_LONG",
-	description = "[YouTube] Video is too long",
+	name = "STREAM_ERROR_SPOTIFY_CONVERTER_TOO_LONG",
+	description = "[Spotify] Track is too long",
 	helptext = [[
-The video exceeds the maximum allowed duration (default: 10 minutes).
-Try a shorter video.
+The track exceeds the maximum allowed duration (default: 10 minutes).
+Try a shorter track.
 ]],
 })
 
 StreamRadioLib.Error.AddStreamErrorCode({
 	id = ERROR_CONVERTER_INVALID_URL,
-	name = "STREAM_ERROR_YT_CONVERTER_INVALID_URL",
-	description = "[YouTube] Invalid YouTube URL",
+	name = "STREAM_ERROR_SPOTIFY_CONVERTER_INVALID_URL",
+	description = "[Spotify] Invalid Spotify URL",
 	helptext = [[
-The provided URL is not a valid YouTube video URL.
+The provided URL is not a valid Spotify track URL.
 ]],
 })
 
 StreamRadioLib.Error.AddStreamErrorCode({
 	id = ERROR_CONVERTER_RATE_LIMITED,
-	name = "STREAM_ERROR_YT_CONVERTER_RATE_LIMITED",
-	description = "[YouTube] Rate limited",
+	name = "STREAM_ERROR_SPOTIFY_CONVERTER_RATE_LIMITED",
+	description = "[Spotify] Rate limited",
 	helptext = [[
 Too many conversion requests. Please wait a moment and try again.
 ]],
@@ -131,50 +131,36 @@ local g_cvConverterSecret = CreateConVar(
 	"Shared API key for converter authentication"
 )
 
-local YoutubeURLs = {
-	"youtube://",
-	"yt://",
-	"://youtube.",
-	".youtube.",
-	"://youtu.be",
-}
-
 function RADIOIFACE:CheckURL(url)
-	for i, v in ipairs(YoutubeURLs) do
-		local result = string.find(string.lower(url), v, 1, true)
+	url = string.lower(url)
 
-		if not result then
-			continue
-		end
+	if string.find(url, "spotify.com/track/", 1, true) then return true end
+	if string.find(url, "spotify:track:", 1, true) then return true end
 
+	if string.find(url, "spotify.com/intl-", 1, true) and string.find(url, "/track/", 1, true) then
 		return true
 	end
+
+	if string.find(url, "spotify.com/playlist/", 1, true) then return true end
+	if string.find(url, "spotify:playlist:", 1, true) then return true end
 
 	return false
 end
 
-local function ExtractVideoId(url)
-	url = string.lower(url)
+local function ExtractTrackId(url)
+	local id = string.match(url, "/track/(%w+)")
+	if id and #id == 22 then return id end
 
-	local id = string.match(url, "[?&]v=([%w_-]+)")
-	if id and #id == 11 then return id end
-
-	id = string.match(url, "youtu%.be/([%w_-]+)")
-	if id and #id == 11 then return id end
-
-	id = string.match(url, "youtube%.com/embed/([%w_-]+)")
-	if id and #id == 11 then return id end
-
-	id = string.match(url, "youtube%.com/v/([%w_-]+)")
-	if id and #id == 11 then return id end
+	id = string.match(url, "spotify:track:(%w+)")
+	if id and #id == 22 then return id end
 
 	return nil
 end
 
 local function IsPlaylistURL(url)
 	url = string.lower(url)
-	if string.find(url, "youtube%.com/playlist") then return true end
-	if string.find(url, "[?&]list=") then return true end
+	if string.find(url, "spotify.com/playlist/", 1, true) then return true end
+	if string.find(url, "spotify:playlist:", 1, true) then return true end
 	return false
 end
 
@@ -188,7 +174,17 @@ local function BuildHeaders(secret)
 	return h
 end
 
--- convert first track now, hand the rest to entity playlist
+-- raw spotify: URIs are flaky here, stick to normal track urls
+local function BuildTrackPlaybackUrl(trackData)
+	local trackId = string.Trim(tostring(trackData.track_id or trackData.trackId or ""))
+	if trackId ~= "" then
+		return "https://open.spotify.com/track/" .. trackId
+	end
+
+	return string.Trim(tostring(trackData.url or ""))
+end
+
+-- same flow as yt: first track now, rest stay playlist data
 
 function RADIOIFACE:ConvertPlaylist(url, callback)
 	local realm = SERVER and "SERVER" or "CLIENT"
@@ -224,13 +220,18 @@ function RADIOIFACE:ConvertPlaylist(url, callback)
 
 		local playlistItems = {}
 		for i, t in ipairs(rd.tracks) do
+			local trackUrl = BuildTrackPlaybackUrl(t)
+			if trackUrl == "" then
+				trackUrl = string.Trim(tostring(t.url or ""))
+			end
+
 			playlistItems[i] = {
-				url = t.url,
-				name = t.title or t.url,
+				url = trackUrl,
+				name = t.title or trackUrl,
 			}
 		end
 
-		local firstTrack = rd.tracks[1]
+		local firstTrack = playlistItems[1]
 		self:ConvertSingleTrack(firstTrack.url, converterUrl, converterSecret, function(streamUrl, errCode)
 			if not streamUrl then
 				callback(self, false, nil, errCode or ERROR_CONVERTER_FAILED)
@@ -289,9 +290,9 @@ function RADIOIFACE:ConvertSingleTrack(trackUrl, converterUrl, converterSecret, 
 		end
 
 		local streamUrl = string.TrimRight(converterUrl, "/") .. rd.stream_url
-		local vid = rd.video_id
-		if vid then
-			SetCachedResult(vid, streamUrl)
+		local tid = rd.track_id
+		if tid then
+			SetCachedResult(tid, streamUrl)
 		end
 
 		DebugLog(realm, " Track ready: ", rd.title or "", " -> ", streamUrl)
@@ -317,24 +318,24 @@ function RADIOIFACE:Convert(url, callback)
 		return
 	end
 
-	local videoId = ExtractVideoId(url)
+	local trackId = ExtractTrackId(url)
 
-	if videoId then
-		local cachedUrl = GetCachedResult(videoId)
+	if trackId then
+		local cachedUrl = GetCachedResult(trackId)
 		if cachedUrl then
-			DebugLog(realm, " Using cached result for ", videoId, ": ", cachedUrl)
+			DebugLog(realm, " Using cached result for ", trackId, ": ", cachedUrl)
 			callback(self, true, cachedUrl)
 			return
 		end
 
 		-- same id already in flight, piggyback
-		if g_pendingCallbacks[videoId] then
-			DebugLog(realm, " Conversion already in-flight for ", videoId, ", queuing callback")
-			table.insert(g_pendingCallbacks[videoId], { selfRef = self, callback = callback })
+		if g_pendingCallbacks[trackId] then
+			DebugLog(realm, " Conversion already in-flight for ", trackId, ", queuing callback")
+			table.insert(g_pendingCallbacks[trackId], { selfRef = self, callback = callback })
 			return
 		end
 
-		g_pendingCallbacks[videoId] = { { selfRef = self, callback = callback } }
+		g_pendingCallbacks[trackId] = { { selfRef = self, callback = callback } }
 	end
 
 	DebugLog(realm, " Converter URL: ", converterUrl)
@@ -391,8 +392,8 @@ function RADIOIFACE:Convert(url, callback)
 			if code == 401 then errCode = ERROR_CONVERTER_UNAVAILABLE end
 			if code == 429 then errCode = ERROR_CONVERTER_RATE_LIMITED end
 
-			if videoId then
-				ResolvePending(videoId, false, nil, errCode)
+			if trackId then
+				ResolvePending(trackId, false, nil, errCode)
 			else
 				callback(self, false, nil, errCode)
 			end
@@ -406,8 +407,8 @@ function RADIOIFACE:Convert(url, callback)
 
 		if not responseData then
 			DebugLog(realm, " ERROR: Failed to parse JSON response")
-			if videoId then
-				ResolvePending(videoId, false, nil, ERROR_CONVERTER_FAILED)
+			if trackId then
+				ResolvePending(trackId, false, nil, ERROR_CONVERTER_FAILED)
 			else
 				callback(self, false, nil, ERROR_CONVERTER_FAILED)
 			end
@@ -423,10 +424,12 @@ function RADIOIFACE:Convert(url, callback)
 				errCode = ERROR_CONVERTER_TOO_LONG
 			elseif string.find(errorMsg, "Invalid", 1, true) then
 				errCode = ERROR_CONVERTER_INVALID_URL
+			elseif string.find(errorMsg, "not configured", 1, true) then
+				errCode = ERROR_CONVERTER_UNAVAILABLE
 			end
 
-			if videoId then
-				ResolvePending(videoId, false, nil, errCode)
+			if trackId then
+				ResolvePending(trackId, false, nil, errCode)
 			else
 				callback(self, false, nil, errCode)
 			end
@@ -436,8 +439,8 @@ function RADIOIFACE:Convert(url, callback)
 		local streamPath = responseData.stream_url
 		if not streamPath or streamPath == "" then
 			DebugLog(realm, " ERROR: No stream_url in response")
-			if videoId then
-				ResolvePending(videoId, false, nil, ERROR_CONVERTER_FAILED)
+			if trackId then
+				ResolvePending(trackId, false, nil, ERROR_CONVERTER_FAILED)
 			else
 				callback(self, false, nil, ERROR_CONVERTER_FAILED)
 			end
@@ -446,16 +449,16 @@ function RADIOIFACE:Convert(url, callback)
 
 		local streamUrl = string.TrimRight(converterUrl, "/") .. streamPath
 
-		local vid = responseData.video_id or videoId
-		if vid then
-			SetCachedResult(vid, streamUrl)
+		local tid = responseData.track_id or trackId
+		if tid then
+			SetCachedResult(tid, streamUrl)
 		end
 
 		DebugLog(realm, " SUCCESS: ", responseData.title or "", " -> ", streamUrl)
 		DebugLog(realm, " Duration: ", tostring(responseData.duration or 0), "s, Cached: ", tostring(responseData.cached))
 
-		if videoId then
-			ResolvePending(videoId, true, streamUrl)
+		if trackId then
+			ResolvePending(trackId, true, streamUrl)
 		else
 			callback(self, true, streamUrl)
 		end
@@ -463,4 +466,3 @@ function RADIOIFACE:Convert(url, callback)
 end
 
 return true
-
