@@ -739,11 +739,15 @@ function ENT:SetPlaylist(playlist, pos)
 		pos = 1
 	end
 
+	-- suppress per-item sync during bulk load; one sync at the end is enough
+	self._bulkPlaylistUpdate = true
 	self:ClearPlaylist()
 	self:AddItemsToPlaylist(playlist)
+	self._bulkPlaylistUpdate = nil
 
 	local playlistObj = self.PlaylistData
 	playlistObj.pos = math.Clamp(pos or 1, 1, #playlistObj.data)
+	self:SyncPlaylistState()
 end
 
 function ENT:ClearPlaylist()
@@ -776,6 +780,7 @@ end
 
 function ENT:SyncPlaylistState()
 	if CLIENT then return end
+	if self._bulkPlaylistUpdate then return end
 
 	local hasPlaylist = self:HasPlaylistInternal()
 

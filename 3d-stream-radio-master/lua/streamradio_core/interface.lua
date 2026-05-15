@@ -84,7 +84,7 @@ function LIB.GetInterface(name)
 	return g_intefacesByName[name]
 end
 
-function LIB.Convert(url, callback)
+function LIB.Convert(url, callback, context)
 	url = LIBUrl.SanitizeUrl(url)
 
 	callback = callback or g_emptyFunction
@@ -113,10 +113,11 @@ function LIB.Convert(url, callback)
 		else
 			errorcode = tonumber(errorcode or -1) or -1
 			convertedUrl = ""
+			playlistData = nil
 		end
 
 		callback(this, success, convertedUrl, errorcode, playlistData)
-	end)
+	end, context)
 end
 
 return true

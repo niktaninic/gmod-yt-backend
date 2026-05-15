@@ -9,9 +9,26 @@ const youtube = require('./youtube');
 const spotify = require('./spotify');
 const database = require('./database');
 const { startCleanupInterval } = require('./cache');
+const metrics = require('./metrics');
+const { registerDevRoutes } = require('./dev');
 
 const app = express();
 app.use(express.json());
+
+// request logger — logs method, path, IP, and any body fields useful for debugging
+app.use((req, _res, next) => {
+  const b = req.body || {};
+  const extra = [];
+  if (b.steamid !== undefined) extra.push(`steamid=${b.steamid}`);
+  if (b.rank !== undefined) extra.push(`rank=${b.rank}`);
+  if (b.nick !== undefined) extra.push(`nick=${b.nick}`);
+  if (b.player_ip !== undefined) extra.push(`player_ip=${b.player_ip}`);
+  if (b.url !== undefined) extra.push(`url=${String(b.url).slice(0, 80)}`);
+  console.log(`[REQ] ${req.method} ${req.path} ip=${req.ip}${extra.length ? ' | ' + extra.join(' ') : ''}`);
+  next();
+});
+
+app.use(express.static(path.join(__dirname, 'public')));
 
 // if gmod sends server_ip, rate limit by that instead of proxy ip noise
 const apiLimiter = rateLimit({
@@ -25,12 +42,53 @@ const apiLimiter = rateLimit({
 
 // one yt id at a time, everyone else waits
 const conversionLocks = new Map();
+
+// keep metrics updated with current lock count
+function _syncConvLocks() { metrics.setActiveConversions(conversionLocks.size); }
+
+function _validRank(r) {
+  return (typeof r === 'string' && /^[a-zA-Z0-9_-]{1,32}$/.test(r)) ? r : 'default';
+}
+
+// accept player IP from body (sent by GMod server which knows the player's IP)
+// only used for logging — not a security boundary
+function _validPlayerIp(ip) {
+  if (typeof ip !== 'string' || ip.length > 45) return null;
+  // IPv4 — validate each octet is 0-255
+  const v4 = ip.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (v4) {
+    return v4.slice(1).every(o => parseInt(o, 10) <= 255) ? ip : null;
+  }
+  // IPv6 — must contain at least one colon
+  if (ip.includes(':') && /^[0-9a-fA-F:]{2,39}$/.test(ip)) return ip;
+  return null;
+}
+
+// STEAM_0:0:12345678, STEAM_1:1:12345678, [U:1:12345], 76561198000000000
+function _validSteamId(s) {
+  if (typeof s !== 'string' || s.length > 25) return null;
+  if (/^STEAM_[0-9]:[01]:\d{1,10}$/.test(s)) return s;
+  if (/^\[U:1:\d{1,10}\]$/.test(s)) return s;
+  if (/^7656119\d{10}$/.test(s)) return s;
+  return null;
+}
+
 app.post('/api/convert', apiLimiter, authMiddleware, async (req, res) => {
   try {
     const { url, nick, steamid, server_ip } = req.body || {};
+    const rank = _validRank(req.body?.rank);
+    const playerIp = _validPlayerIp(req.body?.player_ip) || req.ip;
+    const validSteamid = _validSteamId(steamid);
+    // null limits = rank not configured = unlimited
+    const limits = config.rankLimits[rank] || null;
 
     if (!url) {
       return res.status(400).json({ error: 'Missing "url" parameter' });
+    }
+
+    // block check — before any heavy work
+    if (validSteamid && database.isBlocked(validSteamid)) {
+      return res.status(403).json({ error: 'Blocked' });
     }
 
     let videoId = youtube.extractVideoId(url);
@@ -82,12 +140,14 @@ app.post('/api/convert', apiLimiter, authMiddleware, async (req, res) => {
           title: resolvedTitle || cached.title,
           duration: cached.duration,
           nick: nick || '',
-          steamid: steamid || '',
+          steamid: validSteamid || '',
           serverIp: server_ip || '',
           cached: true,
           source,
+          rank,
         });
 
+        metrics.recordConversion({ videoId, title: resolvedTitle || cached.title, durationMs: 0, cached: true, source, nick, steamid: validSteamid, serverIp: server_ip, playerIp });
         return res.json({
           success: true,
           stream_url: `/stream/${videoId}.mp3`,
@@ -117,11 +177,13 @@ app.post('/api/convert', apiLimiter, authMiddleware, async (req, res) => {
             title: resolvedTitle || retryCache.title,
             duration: retryCache.duration,
             nick: nick || '',
-            steamid: steamid || '',
+            steamid: validSteamid || '',
             serverIp: server_ip || '',
             cached: true,
             source,
+            rank,
           });
+          metrics.recordConversion({ videoId, title: resolvedTitle || retryCache.title, durationMs: 0, cached: true, source, nick, steamid: validSteamid, serverIp: server_ip, playerIp });
           return res.json({
             success: true,
             stream_url: `/stream/${videoId}.mp3`,
@@ -135,22 +197,19 @@ app.post('/api/convert', apiLimiter, authMiddleware, async (req, res) => {
       }
     }
 
-    const conversionPromise = (async () => {
-      const info = await converter.getVideoInfo(videoId);
-      const duration = Math.floor(info.duration || 0);
-      const title = info.title || videoId;
-
-      if (duration > config.maxDurationSeconds) {
-        const maxMin = Math.floor(config.maxDurationSeconds / 60);
-        const vidMin = Math.floor(duration / 60);
-        const vidSec = duration % 60;
-        throw {
-          status: 400,
-          message: `Video too long (${vidMin}:${String(vidSec).padStart(2, '0')}). Maximum allowed: ${maxMin} minutes.`,
-        };
+    // rank: daily conversion limit check
+    // cache hits already returned above, so this only runs for fresh conversions
+    if (validSteamid && limits && limits.dailyConversions > 0) {
+      const todayCount = database.getDailyConversions(validSteamid);
+      if (todayCount >= limits.dailyConversions) {
+        return res.status(429).json({ error: `Daily conversion limit reached (${limits.dailyConversions}/day for rank "${rank}")` });
       }
+    }
 
-      const filePath = await converter.downloadAudio(videoId);
+    const conversionPromise = (async () => {
+      const t0 = Date.now();
+      const { title, duration, filePath } = await converter.convertAudio(videoId, limits ? limits.maxDurationSeconds : null);
+      const ytdlpMs = Date.now() - t0;
       const stats = fs.statSync(filePath);
 
       database.setCacheEntry({
@@ -162,34 +221,40 @@ app.post('/api/convert', apiLimiter, authMiddleware, async (req, res) => {
         expiresDays: config.cacheDays,
       });
 
-      return { title, duration };
+      return { title, duration, ytdlpMs };
     })();
 
     conversionLocks.set(videoId, conversionPromise);
+    _syncConvLocks();
 
     let result;
     try {
       result = await conversionPromise;
     } catch (err) {
-      conversionLocks.delete(videoId);
+      metrics.recordConversion({ videoId, error: err.message || String(err), source, nick, steamid, serverIp: server_ip, playerIp });
       if (err.status) {
         return res.status(err.status).json({ error: err.message });
       }
       console.error(`Conversion error for ${videoId}:`, err.message || err);
       return res.status(500).json({ error: 'Conversion failed' });
     } finally {
-      setTimeout(() => conversionLocks.delete(videoId), 1000);
+      // guard against deleting a new lock that started for the same id within 1s
+      const ref = conversionPromise;
+      setTimeout(() => { if (conversionLocks.get(videoId) === ref) { conversionLocks.delete(videoId); _syncConvLocks(); } }, 1000);
     }
+
+    metrics.recordConversion({ videoId, title: resolvedTitle || result.title, ytdlpMs: result.ytdlpMs, cached: false, source, nick, steamid: validSteamid, serverIp: server_ip, playerIp });
 
     database.addHistory({
       videoId,
       title: resolvedTitle || result.title,
       duration: result.duration,
       nick: nick || '',
-      steamid: steamid || '',
+      steamid: validSteamid || '',
       serverIp: server_ip || '',
       cached: false,
       source,
+      rank,
     });
 
     res.json({
@@ -302,7 +367,7 @@ app.post('/api/playlist', apiLimiter, authMiddleware, async (req, res) => {
   }
 });
 
-app.get('/api/history', (req, res) => {
+app.get('/api/history', authMiddleware, (req, res) => {
   const page = Math.max(1, parseInt(req.query.page, 10) || 1);
   const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 50));
   const offset = (page - 1) * limit;
@@ -319,6 +384,15 @@ app.get('/api/history', (req, res) => {
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });
+});
+
+// GMod server pushes its ULX usergroup list here so the dev console can show them
+app.post('/api/ranks', authMiddleware, (req, res) => {
+  const { ranks } = req.body || {};
+  if (!Array.isArray(ranks)) return res.status(400).json({ error: 'ranks must be an array' });
+  const clean = ranks.filter(r => typeof r === 'string' && /^[a-zA-Z0-9_-]{1,32}$/.test(r));
+  app._knownRanks = clean;
+  res.json({ ok: true, stored: clean.length });
 });
 
 // cached mp3 endpoint, range works
@@ -344,6 +418,9 @@ app.get('/stream/:filename', (req, res) => {
     'Cache-Control': 'public, max-age=86400',
   });
 
+  metrics.incrementStream(videoId);
+  res.on('close', () => metrics.decrementStream(videoId));
+
   const range = req.headers.range;
   if (range) {
     const parts = range.replace(/bytes=/, '').split('-');
@@ -364,6 +441,8 @@ app.get('/stream/:filename', (req, res) => {
     fs.createReadStream(filePath).pipe(res);
   }
 });
+
+registerDevRoutes(app);
 
 startCleanupInterval();
 

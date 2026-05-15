@@ -117,8 +117,11 @@ async function getPlaylistTracks(playlistId) {
   const tracks = [];
   let offset = 0;
   const limit = 100;
+  const MAX_PAGES = 200;
+  let pages = 0;
 
-  while (true) {
+  while (pages < MAX_PAGES) {
+    pages++;
     const data = await fetchSpotifyApi(token, `/v1/playlists/${encodeURIComponent(playlistId)}/tracks?limit=${limit}&offset=${offset}`);
     for (const item of (data.items || [])) {
       const track = item.track;

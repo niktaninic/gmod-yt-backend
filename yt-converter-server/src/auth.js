@@ -1,9 +1,14 @@
+const crypto = require('crypto');
 const config = require('./config');
 
 function authMiddleware(req, res, next) {
   const apiKey = req.headers['x-sr-key'];
-  if (apiKey && config.apiSecret && apiKey === config.apiSecret) {
-    return next();
+  if (apiKey && config.apiSecret) {
+    try {
+      const a = Buffer.from(apiKey);
+      const b = Buffer.from(config.apiSecret);
+      if (a.length === b.length && crypto.timingSafeEqual(a, b)) return next();
+    } catch (_) {}
   }
 
   // dev-only bypass, dead simple on purpose

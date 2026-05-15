@@ -27,7 +27,8 @@ end
 
 -- survives lua hot reload
 StreamRadioLib._ytResultCache = StreamRadioLib._ytResultCache or {}
-StreamRadioLib._ytPendingCallbacks = StreamRadioLib._ytPendingCallbacks or {}
+-- don't preserve pending callbacks across reloads: old closures capture dead upvalues
+StreamRadioLib._ytPendingCallbacks = {}
 
 local g_resultCache = StreamRadioLib._ytResultCache
 local g_pendingCallbacks = StreamRadioLib._ytPendingCallbacks
@@ -117,14 +118,15 @@ Too many conversion requests. Please wait a moment and try again.
 ]],
 })
 
-local g_cvConverterUrl = CreateConVar(
+-- spotify.lua may load first (alphabetical); avoid duplicate convar warnings
+local g_cvConverterUrl = GetConVar("sv_streamradio_converter_url") or CreateConVar(
 	"sv_streamradio_converter_url",
 	"",
 	bit.bor(FCVAR_ARCHIVE, FCVAR_GAMEDLL, FCVAR_REPLICATED),
 	"URL of the converter server, e.g. http://your-server:9999"
 )
 
-local g_cvConverterSecret = CreateConVar(
+local g_cvConverterSecret = GetConVar("sv_streamradio_converter_secret") or CreateConVar(
 	"sv_streamradio_converter_secret",
 	"",
 	bit.bor(FCVAR_ARCHIVE, FCVAR_GAMEDLL, FCVAR_REPLICATED),
@@ -154,19 +156,32 @@ function RADIOIFACE:CheckURL(url)
 end
 
 local function ExtractVideoId(url)
-	url = string.lower(url)
+	-- patterns match on lowercased url but ID is extracted from original (IDs are case-sensitive)
+	local low = string.lower(url)
 
-	local id = string.match(url, "[?&]v=([%w_-]+)")
-	if id and #id == 11 then return id end
+	local s, e = string.find(low, "[?&]v=")
+	if s then
+		local id = string.match(url, "[?&]v=([%w_-]+)", s)
+		if id and #id == 11 then return id end
+	end
 
-	id = string.match(url, "youtu%.be/([%w_-]+)")
-	if id and #id == 11 then return id end
+	s = string.find(low, "youtu%.be/")
+	if s then
+		local id = string.match(url, "youtu%.be/([%w_-]+)", s)
+		if id and #id == 11 then return id end
+	end
 
-	id = string.match(url, "youtube%.com/embed/([%w_-]+)")
-	if id and #id == 11 then return id end
+	s = string.find(low, "youtube%.com/embed/")
+	if s then
+		local id = string.match(url, "youtube%.com/embed/([%w_-]+)", s)
+		if id and #id == 11 then return id end
+	end
 
-	id = string.match(url, "youtube%.com/v/([%w_-]+)")
-	if id and #id == 11 then return id end
+	s = string.find(low, "youtube%.com/v/")
+	if s then
+		local id = string.match(url, "youtube%.com/v/([%w_-]+)", s)
+		if id and #id == 11 then return id end
+	end
 
 	return nil
 end
@@ -182,6 +197,22 @@ local function GetConverterConfig()
 	return string.Trim(g_cvConverterUrl:GetString()), string.Trim(g_cvConverterSecret:GetString())
 end
 
+-- returns {ip, rank} for the given player
+-- rank = ULX/ULib usergroup ("user", "admin", "superadmin", custom, ...)
+local function GetPlayerInfo(ply)
+	if not IsValid(ply) or not ply:IsPlayer() then return nil end
+
+	-- IPAddress() returns "ip:port", strip port
+	local raw = ply:IPAddress() or ""
+	local ip = string.match(raw, "^(.+):%d+$") or raw
+
+	-- GetUserGroup() is the standard ULib/ULX accessor
+	-- returns "user" for regular players, or whatever group the admin set
+	local rank = ply:GetUserGroup() or "user"
+
+	return { ip = ip, rank = rank }
+end
+
 local function BuildHeaders(secret)
 	local h = { ["Content-Type"] = "application/json" }
 	if secret ~= "" then h["X-SR-Key"] = secret end
@@ -190,7 +221,7 @@ end
 
 -- convert first track now, hand the rest to entity playlist
 
-function RADIOIFACE:ConvertPlaylist(url, callback)
+function RADIOIFACE:ConvertPlaylist(url, callback, context)
 	local realm = SERVER and "SERVER" or "CLIENT"
 	DebugLog(realm, " Playlist convert called for: ", url)
 
@@ -230,7 +261,7 @@ function RADIOIFACE:ConvertPlaylist(url, callback)
 			}
 		end
 
-		local firstTrack = rd.tracks[1]
+		local firstTrack = playlistItems[1]
 		self:ConvertSingleTrack(firstTrack.url, converterUrl, converterSecret, function(streamUrl, errCode)
 			if not streamUrl then
 				callback(self, false, nil, errCode or ERROR_CONVERTER_FAILED)
@@ -242,11 +273,11 @@ function RADIOIFACE:ConvertPlaylist(url, callback)
 				tracks = playlistItems,
 				currentIndex = 1,
 			})
-		end)
+		end, context)
 	end, util.TableToJSON(body), "POST", headers, "application/json")
 end
 
-function RADIOIFACE:ConvertSingleTrack(trackUrl, converterUrl, converterSecret, resultCallback)
+function RADIOIFACE:ConvertSingleTrack(trackUrl, converterUrl, converterSecret, resultCallback, context)
 	local realm = SERVER and "SERVER" or "CLIENT"
 
 	local bodyTable = {
@@ -254,6 +285,8 @@ function RADIOIFACE:ConvertSingleTrack(trackUrl, converterUrl, converterSecret, 
 		nick = "",
 		steamid = "",
 		server_ip = "",
+		player_ip = "",
+		rank = "default",
 	}
 
 	if CLIENT then
@@ -261,11 +294,19 @@ function RADIOIFACE:ConvertSingleTrack(trackUrl, converterUrl, converterSecret, 
 		if IsValid(ply) then
 			bodyTable.nick = ply:Nick() or ""
 			bodyTable.steamid = ply:SteamID() or ""
+			-- GetUserGroup() is networked by ULib to clients
+			bodyTable.rank = ply:GetUserGroup() or "user"
 		end
 	end
 
 	if SERVER then
 		bodyTable.server_ip = game.GetIPAddress() or ""
+		local ctxPly = context and context.ply or nil
+		local info = GetPlayerInfo(ctxPly)
+		if info then
+			bodyTable.player_ip = info.ip
+			bodyTable.rank = info.rank
+		end
 	end
 
 	local headers = BuildHeaders(converterSecret)
@@ -299,12 +340,12 @@ function RADIOIFACE:ConvertSingleTrack(trackUrl, converterUrl, converterSecret, 
 	end, util.TableToJSON(bodyTable), "POST", headers, "application/json")
 end
 
-function RADIOIFACE:Convert(url, callback)
+function RADIOIFACE:Convert(url, callback, context)
 	local realm = SERVER and "SERVER" or "CLIENT"
 	DebugLog(realm, " Convert called for: ", url)
 
 	if IsPlaylistURL(url) then
-		self:ConvertPlaylist(url, callback)
+		self:ConvertPlaylist(url, callback, context)
 		return
 	end
 
@@ -344,6 +385,8 @@ function RADIOIFACE:Convert(url, callback)
 		nick = "",
 		steamid = "",
 		server_ip = "",
+		player_ip = "",
+		rank = "default",
 	}
 
 	if CLIENT then
@@ -351,11 +394,18 @@ function RADIOIFACE:Convert(url, callback)
 		if IsValid(ply) then
 			bodyTable.nick = ply:Nick() or ""
 			bodyTable.steamid = ply:SteamID() or ""
+			bodyTable.rank = ply:GetUserGroup() or "user"
 		end
 	end
 
 	if SERVER then
 		bodyTable.server_ip = game.GetIPAddress() or ""
+		local ctxPly = context and context.ply or nil
+		local info = GetPlayerInfo(ctxPly)
+		if info then
+			bodyTable.player_ip = info.ip
+			bodyTable.rank = info.rank
+		end
 	end
 
 	local bodyJson = util.TableToJSON(bodyTable)

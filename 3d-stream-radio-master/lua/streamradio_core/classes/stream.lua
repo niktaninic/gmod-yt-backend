@@ -1211,7 +1211,31 @@ function CLASS:StartConnectingProcess(streamTaskUid, nodownload)
 
 	local externalUrl = self.URL.external
 
+	-- pass player context so the interface can send correct IP and rank in its HTTP request
+	local context = {}
+	if SERVER then
+		local ply = IsValid(self._triggerPly) and self._triggerPly or nil
+		if not ply then
+			local ent = self:GetEntity()
+			if IsValid(ent) then
+				-- try standard GetOwner
+				if ent.GetOwner then
+					local owner = ent:GetOwner()
+					if IsValid(owner) and owner:IsPlayer() then ply = owner end
+				end
+				-- try CPPI (Prop Protection interface, supported by most GMod prop protection addons)
+				if not ply and ent.CPPIGetOwner then
+					local owner = ent:CPPIGetOwner()
+					if IsValid(owner) and owner:IsPlayer() then ply = owner end
+				end
+			end
+		end
+		context.ply = ply
+		self._triggerPly = nil
+	end
+
 	StreamRadioLib.Interface.Convert(externalUrl, function(interface, success, internalUrl, errorcode, playlistData)
+		-- (context consumed by interface above)
 		if not self:_IsActiveStreamTaskUid(streamTaskUid) then
 			return
 		end
@@ -1220,20 +1244,6 @@ function CLASS:StartConnectingProcess(streamTaskUid, nodownload)
 			self:AcceptError(LIBError.STREAM_ERROR_UNKNOWN)
 			return
 		end
-
-		-- seed entity playlist before connect finishes
-		if playlistData and istable(playlistData.tracks) and #playlistData.tracks > 0 then
-			local ent = self:GetEntity()
-			if IsValid(ent) and ent.SetPlaylist then
-				ent:SetPlaylist(playlistData.tracks, playlistData.currentIndex or 1)
-
-				-- playlist mode drives auto-next on track end
-				if ent.SetPlaybackLoopMode then
-					ent:SetPlaybackLoopMode(StreamRadioLib.PLAYBACK_LOOP_MODE_PLAYLIST)
-				end
-			end
-		end
-
 
 		if not self.State.HasBass and SERVER then
 			self:AcceptError(LIBError.STREAM_ERROR_MISSING_GM_BASS3)
@@ -1253,6 +1263,19 @@ function CLASS:StartConnectingProcess(streamTaskUid, nodownload)
 		if not success then
 			self:AcceptError(errorcode)
 			return
+		end
+
+		-- seed entity playlist only after confirming success and bass availability
+		if playlistData and istable(playlistData.tracks) and #playlistData.tracks > 0 then
+			local ent = self:GetEntity()
+			if IsValid(ent) and ent.SetPlaylist then
+				ent:SetPlaylist(playlistData.tracks, playlistData.currentIndex or 1)
+
+				-- playlist mode drives auto-next on track end
+				if ent.SetPlaybackLoopMode then
+					ent:SetPlaybackLoopMode(StreamRadioLib.PLAYBACK_LOOP_MODE_PLAYLIST)
+				end
+			end
 		end
 
 		self:IsAllowedUrlPair(externalUrl, internalUrl, function(this, allowed, blockErrorCode)
@@ -1292,7 +1315,7 @@ function CLASS:StartConnectingProcess(streamTaskUid, nodownload)
 				self:RunConnectingProcessWithDownload(streamTaskUid, interface, internalUrl)
 			end)
 		end, true)
-	end)
+	end, context)
 end
 
 function CLASS:RunConnectingProcessWithDownload(streamTaskUid, interface, internalUrl)
@@ -1710,9 +1733,13 @@ function CLASS:HasChannel()
 	return self:GetChannel() ~= nil
 end
 
-function CLASS:SetURL(url)
+function CLASS:SetURL(url, ply)
 	if not self.Valid then return end
 	if CLIENT and self.Network.Active then return end
+
+	if SERVER and IsValid(ply) and ply:IsPlayer() then
+		self._triggerPly = ply
+	end
 
 	self.URL.external = LIBUrl.SanitizeUrl(url)
 end

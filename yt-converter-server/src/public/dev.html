@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>YT Converter // DEV CONSOLE</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:       #0d0d0d;
+  --bg2:      #141414;
+  --bg3:      #1a1a1a;
+  --border:   #2a2a2a;
+  --border2:  #333;
+  --text:     #c8c8c8;
+  --text-dim: #666;
+  --green:    #39ff14;
+  --yellow:   #f0c040;
+  --red:      #ff4040;
+  --blue:     #4090ff;
+  --cyan:     #30d0d0;
+  --font: 'Courier New', Courier, monospace;
+}
+
+html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 13px; }
+
+#app { display: flex; flex-direction: column; height: 100vh; }
+
+#topbar {
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border2);
+  padding: 5px 12px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+#topbar .title { color: var(--green); font-size: 13px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase; user-select: none; }
+#topbar .sep { color: var(--border2); }
+.hdr-stat { color: var(--text-dim); font-size: 12px; }
+.hdr-stat span { color: var(--text); }
+#hdr-clock { margin-left: auto; color: var(--text-dim); font-size: 11px; }
+
+#tabs { background: var(--bg2); border-bottom: 1px solid var(--border2); display: flex; flex-shrink: 0; }
+.tab { padding: 7px 16px; cursor: pointer; color: var(--text-dim); border-right: 1px solid var(--border); user-select: none; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+.tab:hover { background: var(--bg3); color: var(--text); }
+.tab.active { color: var(--green); background: var(--bg3); border-bottom: 2px solid var(--green); }
+
+#content { flex: 1; overflow: hidden; display: flex; }
+.panel { display: none; flex: 1; overflow-y: auto; padding: 12px; flex-direction: column; gap: 10px; }
+.panel.active { display: flex; }
+
+.section { background: var(--bg2); border: 1px solid var(--border); }
+.section-head { padding: 5px 10px; background: var(--bg3); border-bottom: 1px solid var(--border); color: var(--text-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; display: flex; align-items: center; gap: 8px; }
+.section-body { padding: 10px; }
+
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
+.stat-box { background: var(--bg3); border: 1px solid var(--border); padding: 8px 12px; }
+.stat-box .label { color: var(--text-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+.stat-box .value { font-size: 20px; color: var(--green); margin-top: 2px; }
+
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th { text-align: left; padding: 5px 8px; background: var(--bg3); border-bottom: 1px solid var(--border2); color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; font-size: 11px; }
+td { padding: 4px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+tr:hover td { background: var(--bg3); }
+
+.ev { display: flex; gap: 8px; padding: 2px 0; border-bottom: 1px solid #181818; font-size: 12px; }
+.ev .ts { color: var(--text-dim); min-width: 88px; flex-shrink: 0; }
+.ev .badge { font-size: 11px; padding: 0 5px; min-width: 78px; text-align: center; flex-shrink: 0; line-height: 1.7; }
+.badge-conv { background: #0a2a0a; color: var(--green); border: 1px solid #1a4a1a; }
+.badge-hit  { background: #0a1e2a; color: var(--blue);  border: 1px solid #1a3a4a; }
+.badge-err  { background: #2a0a0a; color: var(--red);   border: 1px solid #4a1a1a; }
+.ev .info { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ev .nick { color: var(--cyan); }
+
+button {
+  background: var(--bg3); border: 1px solid var(--border2); color: var(--text);
+  padding: 5px 12px; font-family: var(--font); font-size: 12px; cursor: pointer;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+button:hover { background: #222; border-color: var(--green); color: var(--green); }
+button:disabled { opacity: 0.4; cursor: default; }
+button.danger:hover { border-color: var(--red); color: var(--red); }
+button.mode-active { border-color: var(--green); color: var(--green); }
+
+input.dev-input {
+  background: var(--bg3); border: 1px solid var(--border2); color: var(--text);
+  padding: 5px 7px; font-family: var(--font); font-size: 12px; outline: none; width: 100%;
+}
+input.dev-input:focus { border-color: var(--green); }
+
+#test-log {
+  background: #080808; border: 1px solid var(--border); padding: 10px;
+  font-size: 12px; line-height: 1.7; min-height: 200px; max-height: 500px;
+  overflow-y: auto; white-space: pre-wrap; word-break: break-all;
+}
+.log-ok   { color: var(--green); }
+.log-err  { color: var(--red); }
+.log-info { color: var(--text); }
+.log-dim  { color: var(--text-dim); }
+
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 800px) { .row2 { grid-template-columns: 1fr; } }
+.file-size { color: var(--yellow); }
+.expire-soon { color: var(--red); }
+.tag-green { color: var(--green); }
+.tag-red   { color: var(--red); }
+.tag-blue  { color: var(--blue); }
+.tag-cyan  { color: var(--cyan); }
+.tag-yellow{ color: var(--yellow); }
+.tag-dim   { color: var(--text-dim); }
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border2); }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div id="topbar">
+    <span class="title">&#9654; YT Converter // Dev</span>
+    <span class="sep">|</span>
+    <span class="hdr-stat">uptime: <span id="hdr-uptime">--</span></span>
+    <span class="sep">|</span>
+    <span class="hdr-stat">&#9679; <span id="hdr-streams">0</span> streaming</span>
+    <span class="hdr-stat">&#9711; <span id="hdr-convs">0</span> converting</span>
+    <span id="hdr-clock"></span>
+  </div>
+
+  <div id="tabs">
+    <div class="tab active" data-tab="overview">Overview</div>
+    <div class="tab" data-tab="events">Events</div>
+    <div class="tab" data-tab="players">Players</div>
+    <div class="tab" data-tab="cache">Cache</div>
+    <div class="tab" data-tab="test">Test</div>
+  </div>
+
+  <div id="content">
+
+    <!-- OVERVIEW -->
+    <div class="panel active" id="tab-overview">
+      <div class="section">
+        <div class="section-head">Stats</div>
+        <div class="section-body">
+          <div class="stats-grid" id="conv-stats"></div>
+        </div>
+      </div>
+      <div class="row2">
+        <div class="section">
+          <div class="section-head">CPU</div>
+          <div class="section-body" id="cpu-info"><span class="tag-dim">loading...</span></div>
+        </div>
+        <div class="section">
+          <div class="section-head">Memory</div>
+          <div class="section-body" id="mem-info"><span class="tag-dim">loading...</span></div>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-head">
+          Rank limits
+          <span id="rank-known-count" class="tag-dim" style="font-size:11px; font-weight:normal; text-transform:none; margin-left:4px;"></span>
+          <button id="rank-add-btn" style="margin-left:auto; padding:2px 8px; font-size:11px;" onclick="showAddRank()">+ Add rank</button>
+          <button id="rank-save-btn" style="padding:2px 8px; font-size:11px; display:none;" onclick="saveRankLimits()">&#10003; Save all</button>
+        </div>
+        <div style="padding:0;">
+          <table>
+            <thead><tr><th>Rank</th><th>Max duration (s)</th><th>Daily conv. (-1 = ∞)</th><th></th></tr></thead>
+            <tbody id="rank-tbody"><tr><td colspan="4" class="tag-dim" style="padding:8px;">loading...</td></tr></tbody>
+          </table>
+          <div id="rank-add-form" style="display:none; padding:8px; border-top:1px solid var(--border); display:none;">
+            <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+              <input id="rank-new-name" class="dev-input" style="width:120px;" placeholder="rank name" list="rank-known-dl" autocomplete="off" />
+              <datalist id="rank-known-dl"></datalist>
+              <input id="rank-new-dur" class="dev-input" style="width:90px;" placeholder="max sec (0=∞)" value="0" />
+              <input id="rank-new-daily" class="dev-input" style="width:90px;" placeholder="daily (-1=∞)" value="-1" />
+              <button onclick="addRank()">Add</button>
+              <button onclick="cancelAddRank()">Cancel</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- EVENTS -->
+    <div class="panel" id="tab-events">
+      <div class="section" style="flex:1; display:flex; flex-direction:column; min-height:0;">
+        <div class="section-head">
+          Recent events
+          <button style="margin-left:auto; padding:2px 8px; font-size:11px;" onclick="loadEvents()">&#8635; Refresh</button>
+        </div>
+        <div style="flex:1; overflow-y:auto; padding:8px; font-size:12px; line-height:1.7;" id="event-list">
+          <span class="tag-dim">// loading...</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- PLAYERS -->
+    <div class="panel" id="tab-players">
+      <div class="section">
+        <div class="section-head">
+          Player leaderboard (all-time)
+          <button style="margin-left:auto; padding:2px 8px; font-size:11px;" onclick="loadPlayers()">&#8635; Refresh</button>
+        </div>
+        <div style="padding:0;">
+          <table>
+            <thead><tr>
+              <th>#</th><th>Nick</th><th>SteamID</th><th>Rank</th><th>Plays</th><th>New conv.</th><th>Today</th><th>Last seen</th><th></th>
+            </tr></thead>
+            <tbody id="player-tbody"><tr><td colspan="9" class="tag-dim" style="padding:8px;">loading...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          Blocked players
+          <button style="margin-left:auto; padding:2px 8px; font-size:11px;" onclick="showBlockForm()">+ Block</button>
+        </div>
+        <div id="block-add-form" style="display:none; padding:8px; border-bottom:1px solid var(--border);">
+          <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+            <input id="block-steamid" class="dev-input" style="width:180px;" placeholder="STEAM_0:0:12345678" autocomplete="off" />
+            <input id="block-reason" class="dev-input" style="flex:1; min-width:120px;" placeholder="reason (optional)" />
+            <button onclick="addBlock()">Block</button>
+            <button onclick="cancelBlockForm()">Cancel</button>
+          </div>
+        </div>
+        <div style="padding:0;">
+          <table>
+            <thead><tr><th>SteamID</th><th>Reason</th><th>Blocked at</th><th></th></tr></thead>
+            <tbody id="block-tbody"><tr><td colspan="4" class="tag-dim" style="padding:8px;">loading...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- CACHE -->
+    <div class="panel" id="tab-cache">
+      <div class="section">
+        <div class="section-head">
+          Cache &nbsp;<span id="cache-size" class="tag-dim" style="font-weight:normal; text-transform:none;"></span>
+          <button style="margin-left:auto; padding:2px 8px; font-size:11px;" onclick="loadCache()">&#8635; Refresh</button>
+          <button class="danger" style="padding:2px 8px; font-size:11px;" onclick="purgeCache()">&#9888; Purge all</button>
+        </div>
+        <div style="padding:0;">
+          <table>
+            <thead><tr>
+              <th>Video ID</th><th>Title</th><th>Duration</th><th>Size</th><th>Created</th><th>Expires</th><th></th>
+            </tr></thead>
+            <tbody id="cache-tbody"><tr><td colspan="7" class="tag-dim" style="padding:8px;">loading...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- TEST -->
+    <div class="panel" id="tab-test">
+      <div class="section">
+        <div class="section-head">
+          <span id="test-mode-label">Quick test (SSE debug)</span>
+          <div style="margin-left:auto; display:flex; gap:4px;">
+            <button id="btn-mode-sse" class="mode-active" onclick="setTestMode('sse')" style="padding:2px 10px; font-size:11px;">Quick</button>
+            <button id="btn-mode-sim" onclick="setTestMode('sim')" style="padding:2px 10px; font-size:11px;">Simulate client</button>
+          </div>
+        </div>
+        <div class="section-body" style="display:flex; flex-direction:column; gap:8px;">
+
+          <div id="test-quick">
+            <div style="display:flex; gap:6px;">
+              <input id="test-url" class="dev-input" style="flex:1;" placeholder="YouTube URL or Spotify track URL" />
+              <button id="test-btn" onclick="runQuickTest()">&#9654; Run</button>
+              <button onclick="clearTestLog()">Clear</button>
+            </div>
+          </div>
+
+          <div id="test-sim" style="display:none;">
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:6px;">
+              <div>
+                <div class="tag-dim" style="font-size:11px; margin-bottom:3px;">URL *</div>
+                <input id="sim-url" class="dev-input" placeholder="YouTube / Spotify URL" />
+              </div>
+              <div>
+                <div class="tag-dim" style="font-size:11px; margin-bottom:3px;">Nick</div>
+                <input id="sim-nick" class="dev-input" placeholder="TestPlayer" />
+              </div>
+              <div>
+                <div class="tag-dim" style="font-size:11px; margin-bottom:3px;">SteamID</div>
+                <input id="sim-steamid" class="dev-input" placeholder="STEAM_0:0:12345678" />
+              </div>
+              <div>
+                <div class="tag-dim" style="font-size:11px; margin-bottom:3px;">Server IP</div>
+                <input id="sim-serverip" class="dev-input" placeholder="1.2.3.4:27015" />
+              </div>
+              <div>
+                <div class="tag-dim" style="font-size:11px; margin-bottom:3px;">Rank</div>
+                <input id="sim-rank" class="dev-input" value="default" placeholder="default / vip / admin" />
+              </div>
+              <div style="display:flex; align-items:flex-end; gap:6px;">
+                <button id="sim-btn" onclick="runSimulate()" style="flex:1;">&#9654; Send request</button>
+                <button onclick="clearTestLog()">Clear</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="test-log"><span class="log-dim">// paste a URL and click Run</span></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const token = new URLSearchParams(location.search).get('token') || '';
+
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+    const id = tab.dataset.tab;
+    if (id === 'events') loadEvents();
+    if (id === 'players') { loadPlayers(); loadBlockedPlayers(); }
+    if (id === 'cache') loadCache();
+  });
+});
+
+setInterval(() => {
+  document.getElementById('hdr-clock').textContent =
+    new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+}, 1000);
+
+async function apiFetch(url) {
+  const sep = url.includes('?') ? '&' : '?';
+  const r = await fetch(url + sep + 'token=' + encodeURIComponent(token));
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function fmtDur(s) {
+  if (!s || s < 0) return '--';
+  return Math.floor(s/60) + ':' + String(s%60).padStart(2,'0');
+}
+function fmtMs(ms) {
+  if (ms == null) return '--';
+  if (ms > 60000) return (ms/60000).toFixed(1) + 'm';
+  if (ms > 1000)  return (ms/1000).toFixed(1) + 's';
+  return ms + 'ms';
+}
+function fmtUptime(s) {
+  return Math.floor(s/3600) + 'h ' + Math.floor((s%3600)/60) + 'm ' + (s%60) + 's';
+}
+function fmtDate(str) { return str ? str.slice(0,16) : '--'; }
+function fmtSize(b) {
+  if (!b) return '--';
+  if (b > 1048576) return (b/1048576).toFixed(1) + ' MB';
+  return (b/1024).toFixed(1) + ' KB';
+}
+
+async function loadStats() {
+  try {
+    const d = await apiFetch('/dev/api/stats');
+
+    document.getElementById('hdr-uptime').textContent = fmtUptime(d.system.uptime);
+    document.getElementById('hdr-streams').textContent = d.activeStreams || 0;
+    document.getElementById('hdr-convs').textContent   = d.activeConversions || 0;
+
+    const stats = [
+      { label: 'Active streams',     value: d.activeStreams || 0,         color: d.activeStreams > 0 ? 'var(--green)' : '' },
+      { label: 'Active conversions', value: d.activeConversions || 0,     color: d.activeConversions > 0 ? 'var(--yellow)' : '' },
+      { label: 'Conversions',        value: d.totals.conversions },
+      { label: 'Cache hits',         value: d.totals.cacheHits },
+      { label: 'Errors',             value: d.totals.errors,              color: d.totals.errors > 0 ? 'var(--red)' : '' },
+      { label: 'Spotify resolves',   value: d.totals.spotifyResolves },
+      { label: 'API calls',          value: d.totals.apiCalls },
+      { label: 'Avg conv. time',     value: fmtMs(d.avgConversionMs) },
+    ];
+    document.getElementById('conv-stats').innerHTML = stats.map(s =>
+      '<div class="stat-box"><div class="label">' + s.label + '</div>' +
+      '<div class="value" style="' + (s.color ? 'color:'+s.color : '') + '">' + (s.value != null ? s.value : '--') + '</div></div>'
+    ).join('');
+
+    const cpu = d.system.cpu;
+    document.getElementById('cpu-info').innerHTML =
+      '<table style="font-size:12px;">' +
+      '<tr><td class="tag-dim">model</td><td style="padding-left:12px;">' + esc(cpu.model) + '</td></tr>' +
+      '<tr><td class="tag-dim">cores</td><td style="padding-left:12px;">' + cpu.cores + '</td></tr>' +
+      '<tr><td class="tag-dim">load 1m / 5m / 15m</td><td style="padding-left:12px;" class="tag-yellow">' + cpu.loadAvg1 + ' / ' + cpu.loadAvg5 + ' / ' + cpu.loadAvg15 + '</td></tr>' +
+      '<tr><td class="tag-dim">process uptime</td><td style="padding-left:12px;">' + fmtUptime(d.system.processUptime) + '</td></tr>' +
+      '</table>';
+
+    const mem = d.system.memory;
+    const usedPct = Math.round(mem.usedMB / mem.totalMB * 100);
+    document.getElementById('mem-info').innerHTML =
+      '<table style="font-size:12px;">' +
+      '<tr><td class="tag-dim">system used</td><td style="padding-left:12px;" class="tag-yellow">' + mem.usedMB + ' MB / ' + mem.totalMB + ' MB (' + usedPct + '%)</td></tr>' +
+      '<tr><td class="tag-dim">system free</td><td style="padding-left:12px;">' + mem.freeMB + ' MB</td></tr>' +
+      '<tr><td class="tag-dim">proc RSS</td><td style="padding-left:12px;">' + mem.processRssMB + ' MB</td></tr>' +
+      '<tr><td class="tag-dim">proc heap</td><td style="padding-left:12px;">' + mem.processHeapMB + ' MB</td></tr>' +
+      '</table>';
+
+    if (d.rankLimits !== undefined && !_rankDirty) {
+      renderRankTable(d.rankLimits);
+    }
+    if (d.availableRanks) {
+      _availableRanks = d.availableRanks;
+      _redrawRankTable();
+    }
+  } catch(e) { console.error('stats error', e); }
+}
+
+// ---------- rank limits editor ----------
+
+var _rankEdits = {};
+var _rankDirty = false;
+var _availableRanks = [];
+
+function renderRankTable(limits) {
+  _rankEdits = {};
+  for (var k in limits) { _rankEdits[k] = { maxDurationSeconds: limits[k].maxDurationSeconds, dailyConversions: limits[k].dailyConversions }; }
+  _rankDirty = false;
+  _redrawRankTable();
+}
+
+function _redrawRankTable() {
+  var configured = Object.keys(_rankEdits).sort(function(a,b){ return a.localeCompare(b); });
+  var unlimited  = _availableRanks.filter(function(r){ return !_rankEdits[r]; }).sort(function(a,b){ return a.localeCompare(b); });
+
+  var count = _availableRanks.length;
+  var el = document.getElementById('rank-known-count');
+  if (el) el.textContent = count ? '(' + count + ' ranks from server)' : '';
+
+  var rows = configured.map(function(rank) {
+    var lim = _rankEdits[rank];
+    var durLabel = lim.maxDurationSeconds > 0 ? lim.maxDurationSeconds + 's' : '∞';
+    var dailyLabel = lim.dailyConversions >= 0 ? lim.dailyConversions : '∞';
+    return '<tr id="rank-row-' + esc(rank) + '">' +
+      '<td class="tag-cyan">' + esc(rank) + '</td>' +
+      '<td><input class="dev-input" style="width:90px;" id="rank-dur-' + esc(rank) + '" value="' + lim.maxDurationSeconds + '" oninput="_markRankDirty(\'' + esc(rank) + '\')" /></td>' +
+      '<td><input class="dev-input" style="width:90px;" id="rank-daily-' + esc(rank) + '" value="' + lim.dailyConversions + '" oninput="_markRankDirty(\'' + esc(rank) + '\')" /></td>' +
+      '<td><button class="danger" style="padding:1px 7px; font-size:11px;" onclick="deleteRank(\'' + esc(rank) + '\')">del</button></td>' +
+      '</tr>';
+  });
+
+  // known ranks without restrictions — shown as read-only unlimited rows
+  rows = rows.concat(unlimited.map(function(rank) {
+    return '<tr>' +
+      '<td class="tag-dim">' + esc(rank) + '</td>' +
+      '<td class="tag-dim" style="letter-spacing:0;">&#8734;</td>' +
+      '<td class="tag-dim" style="letter-spacing:0;">&#8734;</td>' +
+      '<td><button style="padding:1px 7px; font-size:11px;" onclick="restrictRank(\'' + esc(rank) + '\')">Restrict</button></td>' +
+      '</tr>';
+  }));
+
+  if (!rows.length) {
+    document.getElementById('rank-tbody').innerHTML =
+      '<tr><td colspan="4" class="tag-dim" style="padding:8px;">// no ranks known yet \u2014 waiting for GMod server to connect</td></tr>';
+  } else {
+    document.getElementById('rank-tbody').innerHTML = rows.join('');
+  }
+  document.getElementById('rank-save-btn').style.display = _rankDirty ? '' : 'none';
+}
+
+function restrictRank(name) {
+  var form = document.getElementById('rank-add-form');
+  form.style.display = '';
+  document.getElementById('rank-new-name').value = name;
+  document.getElementById('rank-new-dur').value = '600';
+  document.getElementById('rank-new-daily').value = '50';
+  document.getElementById('rank-new-dur').focus();
+}
+
+function _markRankDirty(rank) {
+  var dur = parseInt(document.getElementById('rank-dur-' + rank).value, 10);
+  var daily = parseInt(document.getElementById('rank-daily-' + rank).value, 10);
+  if (Number.isFinite(dur) && Number.isFinite(daily)) {
+    _rankEdits[rank] = { maxDurationSeconds: dur, dailyConversions: daily };
+    _rankDirty = true;
+    document.getElementById('rank-save-btn').style.display = '';
+  }
+}
+
+async function saveRankLimits() {
+  var btn = document.getElementById('rank-save-btn');
+  btn.disabled = true;
+  try {
+    var r = await fetch('/dev/api/rank-limits?token=' + encodeURIComponent(token), {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ limits: _rankEdits }),
+    });
+    var d = await r.json();
+    if (!r.ok) { alert('Error: ' + (d.error || r.status)); btn.disabled = false; return; }
+    renderRankTable(d.limits);
+  } catch(e) { alert(e.message); btn.disabled = false; }
+}
+
+async function deleteRank(rank) {
+  if (!confirm('Delete rank "' + rank + '"?')) return;
+  try {
+    var r = await fetch('/dev/api/rank-limits/' + encodeURIComponent(rank) + '?token=' + encodeURIComponent(token), { method: 'DELETE' });
+    var d = await r.json();
+    if (!r.ok) { alert('Error: ' + (d.error || r.status)); return; }
+    renderRankTable(d.limits);
+  } catch(e) { alert(e.message); }
+}
+
+function showAddRank() {
+  var form = document.getElementById('rank-add-form');
+  form.style.display = '';
+  // populate datalist with known ranks not yet restricted
+  var nameInput = document.getElementById('rank-new-name');
+  var dl = document.getElementById('rank-known-dl');
+  if (dl) {
+    dl.innerHTML = _availableRanks
+      .filter(function(r){ return !_rankEdits[r]; })
+      .map(function(r){ return '<option value="' + esc(r) + '">'; })
+      .join('');
+  }
+  nameInput.focus();
+}
+function cancelAddRank() {
+  document.getElementById('rank-add-form').style.display = 'none';
+  document.getElementById('rank-new-name').value = '';
+}
+async function addRank() {
+  var name = document.getElementById('rank-new-name').value.trim();
+  var dur  = parseInt(document.getElementById('rank-new-dur').value, 10);
+  var daily = parseInt(document.getElementById('rank-new-daily').value, 10);
+  if (!name) { alert('rank name required'); return; }
+  if (!Number.isFinite(dur) || dur < 0) { alert('max duration: 0 = unlimited, or enter seconds > 0'); return; }
+  if (!Number.isFinite(daily) || daily < -1) { alert('daily: -1 = unlimited, or enter number >= 0'); return; }
+  _rankEdits[name] = { maxDurationSeconds: dur, dailyConversions: daily };
+  _rankDirty = true;
+  cancelAddRank();
+  _redrawRankTable();
+  document.getElementById('rank-save-btn').style.display = '';
+}
+
+loadStats();
+setInterval(loadStats, 5000);
+
+async function loadEvents() {
+  var el = document.getElementById('event-list');
+  try {
+    var events = await apiFetch('/dev/api/events?limit=200');
+    if (!events.length) { el.innerHTML = '<span class="tag-dim">// no events yet</span>'; return; }
+    el.innerHTML = events.map(function(ev) {
+      var ts = new Date(ev.ts).toISOString().slice(11,19);
+      var ips = [ev.playerIp ? 'cli:'+esc(ev.playerIp) : '', ev.serverIp ? 'srv:'+esc(ev.serverIp) : ''].filter(Boolean).join(' ');
+      var badge, info;
+      if (ev.type === 'conversion') {
+        badge = '<span class="badge badge-conv">CONVERT</span>';
+        info  = '<span class="tag-cyan">' + esc(ev.videoId||'') + '</span> &nbsp;' + esc(ev.title||'') + ' &nbsp;<span class="tag-dim">' + fmtMs(ev.ytdlpMs) + ' | ' + esc(ev.source||'') + '</span>';
+      } else if (ev.type === 'cache_hit') {
+        badge = '<span class="badge badge-hit">CACHE</span>';
+        info  = '<span class="tag-cyan">' + esc(ev.videoId||'') + '</span> &nbsp;' + esc(ev.title||'') + ' &nbsp;<span class="tag-dim">' + esc(ev.source||'') + '</span>';
+      } else {
+        badge = '<span class="badge badge-err">ERROR</span>';
+        info  = '<span class="tag-red">' + esc(ev.error||'') + '</span> &nbsp;<span class="tag-dim">' + esc(ev.videoId||'') + '</span>';
+      }
+      var nick = ev.nick ? '<span class="nick">[' + esc(ev.nick) + ']</span> ' : '';
+      var ipStr = ips ? ' <span class="tag-dim" style="font-size:11px;">(' + ips + ')</span>' : '';
+      return '<div class="ev"><span class="ts">' + ts + '</span>' + badge + '<span class="info">' + nick + info + ipStr + '</span></div>';
+    }).join('');
+  } catch(e) { el.innerHTML = '<span class="tag-red">Error: ' + esc(e.message) + '</span>'; }
+}
+
+async function loadPlayers() {
+  var tbody = document.getElementById('player-tbody');
+  try {
+    var players = await apiFetch('/dev/api/players');
+    if (!players.length) { tbody.innerHTML = '<tr><td colspan="9" class="tag-dim" style="padding:8px;">no data</td></tr>'; return; }
+    tbody.innerHTML = players.map(function(p, i) {
+      var limits = _rankEdits[p.rank] || null;
+      var dailyLimit = limits && limits.dailyConversions > 0 ? limits.dailyConversions : null;
+      var daily = p.daily_conversions || 0;
+      var dailyColor = dailyLimit ? (daily >= dailyLimit ? 'var(--red)' : daily >= dailyLimit * 0.8 ? 'var(--yellow)' : 'var(--text)') : 'var(--text)';
+      var dailyStr = dailyLimit ? daily + ' / ' + dailyLimit : (daily || '0');
+      var blockBtn = p.steamid
+        ? '<button class="danger" style="padding:1px 5px; font-size:11px;" onclick="quickBlock(\'' + esc(p.steamid) + '\',\'' + esc(p.nick||'') + '\')">Block</button>'
+        : '';
+      var deleteBtn = p.steamid
+        ? '<button class="danger" style="padding:1px 5px; font-size:11px;" onclick="deletePlayer(\'' + esc(p.steamid) + '\',\'' + esc(p.nick||'') + '\')">Del</button>'
+        : '';
+      return '<tr>' +
+        '<td class="tag-dim">' + (i+1) + '</td>' +
+        '<td class="tag-cyan">' + esc(p.nick||'--') + '</td>' +
+        '<td class="tag-dim" style="font-size:11px;">' + esc(p.steamid||'--') + '</td>' +
+        '<td class="tag-yellow">' + esc(p.rank||'default') + '</td>' +
+        '<td class="tag-green">' + p.plays + '</td>' +
+        '<td>' + p.new_conversions + '</td>' +
+        '<td style="color:' + dailyColor + ';">' + dailyStr + '</td>' +
+        '<td class="tag-dim" style="font-size:11px;">' + fmtDate(p.last_seen) + '</td>' +
+        '<td style="display:flex; gap:3px;">' + blockBtn + deleteBtn + '</td>' +
+        '</tr>';
+    }).join('');
+  } catch(e) { tbody.innerHTML = '<tr><td colspan="9" class="tag-red" style="padding:8px;">' + esc(e.message) + '</td></tr>'; }
+}
+
+// ---------- blocked players ----------
+
+async function loadBlockedPlayers() {
+  var tbody = document.getElementById('block-tbody');
+  if (!tbody) return;
+  try {
+    var data = await apiFetch('/dev/api/blocked');
+    if (!data.length) {
+      tbody.innerHTML = '<tr><td colspan="4" class="tag-dim" style="padding:8px;">// nobody blocked</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.map(function(p) {
+      return '<tr>' +
+        '<td class="tag-red">' + esc(p.steamid) + '</td>' +
+        '<td class="tag-dim">' + esc(p.reason || '--') + '</td>' +
+        '<td class="tag-dim" style="font-size:11px;">' + fmtDate(p.blocked_at) + '</td>' +
+        '<td><button class="danger" style="padding:1px 5px; font-size:11px;" onclick="unblockPlayer(\'' + esc(p.steamid) + '\')">Unblock</button></td>' +
+        '</tr>';
+    }).join('');
+  } catch(e) {
+    tbody.innerHTML = '<tr><td colspan="4" class="tag-red" style="padding:8px;">' + esc(e.message) + '</td></tr>';
+  }
+}
+
+function showBlockForm() {
+  document.getElementById('block-add-form').style.display = '';
+  document.getElementById('block-steamid').focus();
+}
+function cancelBlockForm() {
+  document.getElementById('block-add-form').style.display = 'none';
+  document.getElementById('block-steamid').value = '';
+  document.getElementById('block-reason').value = '';
+}
+async function addBlock() {
+  var steamid = document.getElementById('block-steamid').value.trim();
+  var reason  = document.getElementById('block-reason').value.trim();
+  if (!steamid) { alert('SteamID required'); return; }
+  try {
+    var r = await fetch('/dev/api/blocked?token=' + encodeURIComponent(token), {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ steamid, reason }),
+    });
+    var d = await r.json();
+    if (!r.ok) { alert('Error: ' + (d.error || r.status)); return; }
+    cancelBlockForm();
+    loadBlockedPlayers();
+  } catch(e) { alert(e.message); }
+}
+async function unblockPlayer(steamid) {
+  if (!confirm('Unblock ' + steamid + '?')) return;
+  try {
+    var r = await fetch('/dev/api/blocked/' + encodeURIComponent(steamid) + '?token=' + encodeURIComponent(token), { method: 'DELETE' });
+    var d = await r.json();
+    if (!r.ok) { alert('Error: ' + (d.error || r.status)); return; }
+    loadBlockedPlayers();
+  } catch(e) { alert(e.message); }
+}
+function quickBlock(steamid, nick) {
+  if (!confirm('Block ' + (nick ? nick + ' (' + steamid + ')' : steamid) + '?')) return;
+  fetch('/dev/api/blocked?token=' + encodeURIComponent(token), {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ steamid, reason: 'blocked from leaderboard' }),
+  }).then(function(r){ return r.json(); }).then(function(d) {
+    if (!d.ok) { alert('Error: ' + (d.error || '?')); return; }
+    loadBlockedPlayers();
+  }).catch(function(e){ alert(e.message); });
+}
+
+async function deletePlayer(steamid, nick) {
+  if (!confirm('Delete all history for ' + (nick ? nick + ' (' + steamid + ')' : steamid) + '?\nThis cannot be undone.')) return;
+  try {
+    var r = await fetch('/dev/api/players/' + encodeURIComponent(steamid) + '?token=' + encodeURIComponent(token), { method: 'DELETE' });
+    var d = await r.json();
+    if (!r.ok) { alert('Error: ' + (d.error || r.status)); return; }
+    loadPlayers();
+  } catch(e) { alert(e.message); }
+}
+
+async function loadCache() {
+  var tbody = document.getElementById('cache-tbody');
+  try {
+    var d = await apiFetch('/dev/api/cache');
+    document.getElementById('cache-size').textContent = d.totalSizeMB + ' MB — ' + d.entries.length + ' entries';
+    var now = Date.now();
+    tbody.innerHTML = d.entries.map(function(e) {
+      var expiresMs = new Date(e.expires_at.replace(' ','T')+'Z').getTime();
+      var soon = expiresMs - now < 86400000 * 3;
+      return '<tr>' +
+        '<td class="tag-cyan" style="font-size:11px;">' + esc(e.video_id) + '</td>' +
+        '<td>' + esc(e.title||'--') + '</td>' +
+        '<td class="tag-dim">' + fmtDur(e.duration) + '</td>' +
+        '<td class="file-size">' + fmtSize(e.file_size) + '</td>' +
+        '<td class="tag-dim" style="font-size:11px;">' + fmtDate(e.created_at) + '</td>' +
+        '<td class="' + (soon?'expire-soon':'tag-dim') + '" style="font-size:11px;">' + fmtDate(e.expires_at) + '</td>' +
+        '<td><button class="danger" style="padding:1px 7px; font-size:11px;" onclick="deleteCache(\'' + esc(e.video_id) + '\',this)">del</button></td>' +
+        '</tr>';
+    }).join('');
+  } catch(e) { tbody.innerHTML = '<tr><td colspan="7" class="tag-red" style="padding:8px;">' + esc(e.message) + '</td></tr>'; }
+}
+
+async function deleteCache(videoId, btn) {
+  if (!confirm('Delete cache for ' + videoId + '?')) return;
+  btn.disabled = true;
+  try {
+    await fetch('/dev/api/cache/' + videoId + '?token=' + encodeURIComponent(token), { method: 'DELETE' });
+    loadCache();
+  } catch(e) { alert(e.message); btn.disabled = false; }
+}
+
+async function purgeCache() {
+  if (!confirm('Purge ALL cache? Cannot be undone.')) return;
+  try {
+    var r = await fetch('/dev/api/cache?token=' + encodeURIComponent(token), { method: 'DELETE' });
+    var d = await r.json();
+    alert('Removed ' + d.removed + ' entries.');
+    loadCache();
+  } catch(e) { alert(e.message); }
+}
+
+var _testMode = 'sse';
+function setTestMode(mode) {
+  _testMode = mode;
+  document.getElementById('test-quick').style.display = mode === 'sse' ? '' : 'none';
+  document.getElementById('test-sim').style.display   = mode === 'sim' ? '' : 'none';
+  document.getElementById('btn-mode-sse').classList.toggle('mode-active', mode === 'sse');
+  document.getElementById('btn-mode-sim').classList.toggle('mode-active', mode === 'sim');
+  document.getElementById('test-mode-label').textContent =
+    mode === 'sse' ? 'Quick test (SSE debug)' : 'Simulate GMod client request';
+}
+
+function logLine(html) {
+  var el = document.getElementById('test-log');
+  el.innerHTML += html + '\n';
+  el.scrollTop = el.scrollHeight;
+}
+function clearTestLog() { document.getElementById('test-log').innerHTML = ''; }
+
+function runQuickTest() {
+  var url = document.getElementById('test-url').value.trim();
+  if (!url) return;
+  clearTestLog();
+  document.getElementById('test-btn').disabled = true;
+
+  logLine('<span class="log-dim">// ' + new Date().toISOString() + '</span>');
+  logLine('<span class="log-dim">// URL: ' + esc(url) + '</span>');
+  logLine('<span class="log-dim">// ──────────────────────────────────────</span>');
+
+  var evtUrl = '/dev/api/convert-test?url=' + encodeURIComponent(url) + '&token=' + encodeURIComponent(token);
+  var es = new EventSource(evtUrl);
+
+  es.addEventListener('log', function(e) {
+    var d = JSON.parse(e.data);
+    var txt = esc(d.msg || '');
+    var cls = txt.startsWith('ERROR') ? 'log-err' : 'log-info';
+    logLine('<span class="' + cls + '">' + txt + '</span>');
+  });
+
+  es.addEventListener('done', function(e) {
+    var d = JSON.parse(e.data);
+    logLine('<span class="log-dim">// ──────────────────────────────────────</span>');
+    if (d.ok) {
+      logLine('<span class="log-ok">// DONE' + (d.cached?' (cache hit)':'') + ': ' + fmtMs(d.durationMs) + '</span>');
+    } else {
+      logLine('<span class="log-err">// FAILED: ' + esc(d.error||'unknown') + '</span>');
+    }
+    es.close();
+    document.getElementById('test-btn').disabled = false;
+    loadStats();
+  });
+
+  es.onerror = function() {
+    logLine('<span class="log-err">// SSE connection error</span>');
+    es.close();
+    document.getElementById('test-btn').disabled = false;
+  };
+}
+
+document.getElementById('test-url').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') runQuickTest();
+});
+
+async function runSimulate() {
+  var url = document.getElementById('sim-url').value.trim();
+  if (!url) { alert('URL is required'); return; }
+
+  var btn = document.getElementById('sim-btn');
+  btn.disabled = true;
+  clearTestLog();
+
+  var nick     = document.getElementById('sim-nick').value.trim();
+  var steamid  = document.getElementById('sim-steamid').value.trim();
+  var serverIp = document.getElementById('sim-serverip').value.trim();
+  var rank     = document.getElementById('sim-rank').value.trim() || 'default';
+
+  logLine('<span class="log-dim">// Simulate client — ' + new Date().toISOString() + '</span>');
+  logLine('<span class="log-dim">// URL: ' + esc(url) + '</span>');
+  logLine('<span class="log-dim">// nick=' + esc(nick||'(none)') + ' steamid=' + esc(steamid||'(none)') + ' server=' + esc(serverIp||'(none)') + ' rank=' + esc(rank) + '</span>');
+  logLine('<span class="log-dim">// ──────────────────────────────────────</span>');
+  logLine('<span class="log-info">Sending POST /api/convert...</span>');
+
+  try {
+    var r = await fetch('/dev/api/simulate?token=' + encodeURIComponent(token), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: url, nick: nick, steamid: steamid, server_ip: serverIp, rank: rank }),
+    });
+    var d = await r.json();
+
+    logLine('<span class="log-dim">// ──────────────────────────────────────</span>');
+    logLine('<span class="log-info">HTTP status: ' + d.status + '</span>');
+    logLine('<span class="log-info">Round-trip: ' + fmtMs(d.durationMs) + '</span>');
+    logLine('');
+
+    if (d.response) {
+      var resp = d.response;
+      if (resp.success) {
+        logLine('<span class="log-ok">SUCCESS</span>');
+        logLine('<span class="log-info">Title:    ' + esc(resp.title||'') + '</span>');
+        logLine('<span class="log-info">Duration: ' + fmtDur(resp.duration) + '</span>');
+        logLine('<span class="log-info">Cached:   ' + resp.cached + '</span>');
+        logLine('<span class="log-info">URL:      ' + esc(resp.stream_url||'') + '</span>');
+        if (resp.source === 'spotify') logLine('<span class="log-info">Source:   spotify track ' + esc(resp.track_id||'') + '</span>');
+      } else {
+        logLine('<span class="log-err">FAILED: ' + esc(resp.error || JSON.stringify(resp)) + '</span>');
+      }
+    }
+    loadStats();
+  } catch(e) {
+    logLine('<span class="log-err">Fetch error: ' + esc(e.message) + '</span>');
+  }
+
+  btn.disabled = false;
+}
+</script>
+</body>
+</html>

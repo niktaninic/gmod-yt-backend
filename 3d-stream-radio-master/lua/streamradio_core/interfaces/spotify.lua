@@ -27,7 +27,8 @@ end
 
 -- survives lua hot reload
 StreamRadioLib._spotifyResultCache = StreamRadioLib._spotifyResultCache or {}
-StreamRadioLib._spotifyPendingCallbacks = StreamRadioLib._spotifyPendingCallbacks or {}
+-- don't preserve pending callbacks across reloads: old closures capture dead upvalues
+StreamRadioLib._spotifyPendingCallbacks = {}
 
 local g_resultCache = StreamRadioLib._spotifyResultCache
 local g_pendingCallbacks = StreamRadioLib._spotifyPendingCallbacks
@@ -168,6 +169,19 @@ local function GetConverterConfig()
 	return string.Trim(g_cvConverterUrl:GetString()), string.Trim(g_cvConverterSecret:GetString())
 end
 
+-- returns {ip, rank} for the given player
+-- rank = ULX/ULib usergroup ("user", "admin", "superadmin", custom, ...)
+local function GetPlayerInfo(ply)
+	if not IsValid(ply) or not ply:IsPlayer() then return nil end
+
+	local raw = ply:IPAddress() or ""
+	local ip = string.match(raw, "^(.+):%d+$") or raw
+
+	local rank = ply:GetUserGroup() or "user"
+
+	return { ip = ip, rank = rank }
+end
+
 local function BuildHeaders(secret)
 	local h = { ["Content-Type"] = "application/json" }
 	if secret ~= "" then h["X-SR-Key"] = secret end
@@ -186,7 +200,7 @@ end
 
 -- same flow as yt: first track now, rest stay playlist data
 
-function RADIOIFACE:ConvertPlaylist(url, callback)
+function RADIOIFACE:ConvertPlaylist(url, callback, context)
 	local realm = SERVER and "SERVER" or "CLIENT"
 	DebugLog(realm, " Playlist convert called for: ", url)
 
@@ -243,11 +257,11 @@ function RADIOIFACE:ConvertPlaylist(url, callback)
 				tracks = playlistItems,
 				currentIndex = 1,
 			})
-		end)
+		end, context)
 	end, util.TableToJSON(body), "POST", headers, "application/json")
 end
 
-function RADIOIFACE:ConvertSingleTrack(trackUrl, converterUrl, converterSecret, resultCallback)
+function RADIOIFACE:ConvertSingleTrack(trackUrl, converterUrl, converterSecret, resultCallback, context)
 	local realm = SERVER and "SERVER" or "CLIENT"
 
 	local bodyTable = {
@@ -255,6 +269,8 @@ function RADIOIFACE:ConvertSingleTrack(trackUrl, converterUrl, converterSecret, 
 		nick = "",
 		steamid = "",
 		server_ip = "",
+		player_ip = "",
+		rank = "default",
 	}
 
 	if CLIENT then
@@ -262,11 +278,19 @@ function RADIOIFACE:ConvertSingleTrack(trackUrl, converterUrl, converterSecret, 
 		if IsValid(ply) then
 			bodyTable.nick = ply:Nick() or ""
 			bodyTable.steamid = ply:SteamID() or ""
+			-- GetUserGroup() is networked by ULib to clients
+			bodyTable.rank = ply:GetUserGroup() or "user"
 		end
 	end
 
 	if SERVER then
 		bodyTable.server_ip = game.GetIPAddress() or ""
+		local ctxPly = context and context.ply or nil
+		local info = GetPlayerInfo(ctxPly)
+		if info then
+			bodyTable.player_ip = info.ip
+			bodyTable.rank = info.rank
+		end
 	end
 
 	local headers = BuildHeaders(converterSecret)
@@ -300,12 +324,12 @@ function RADIOIFACE:ConvertSingleTrack(trackUrl, converterUrl, converterSecret, 
 	end, util.TableToJSON(bodyTable), "POST", headers, "application/json")
 end
 
-function RADIOIFACE:Convert(url, callback)
+function RADIOIFACE:Convert(url, callback, context)
 	local realm = SERVER and "SERVER" or "CLIENT"
 	DebugLog(realm, " Convert called for: ", url)
 
 	if IsPlaylistURL(url) then
-		self:ConvertPlaylist(url, callback)
+		self:ConvertPlaylist(url, callback, context)
 		return
 	end
 
@@ -345,6 +369,8 @@ function RADIOIFACE:Convert(url, callback)
 		nick = "",
 		steamid = "",
 		server_ip = "",
+		player_ip = "",
+		rank = "default",
 	}
 
 	if CLIENT then
@@ -352,11 +378,18 @@ function RADIOIFACE:Convert(url, callback)
 		if IsValid(ply) then
 			bodyTable.nick = ply:Nick() or ""
 			bodyTable.steamid = ply:SteamID() or ""
+			bodyTable.rank = ply:GetUserGroup() or "user"
 		end
 	end
 
 	if SERVER then
 		bodyTable.server_ip = game.GetIPAddress() or ""
+		local ctxPly = context and context.ply or nil
+		local info = GetPlayerInfo(ctxPly)
+		if info then
+			bodyTable.player_ip = info.ip
+			bodyTable.rank = info.rank
+		end
 	end
 
 	local bodyJson = util.TableToJSON(bodyTable)

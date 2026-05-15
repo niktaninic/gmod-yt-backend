@@ -1,6 +1,8 @@
 services:
   yt-converter:
-    build: .
+    build:
+      context: .
+      network: host
     container_name: yt-converter
     restart: unless-stopped
     ports:
@@ -13,3 +15,6 @@ services:
       - ./cookies:/app/cookies  # not :ro, yt-dlp writes back to cookies
     environment:
       - COOKIES_FILE=/app/cookies/cookies.txt
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
