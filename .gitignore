@@ -1,5 +1,6 @@
-node_modules/
 data/
 cache/
 cookies/
 .env
+yt-converter-server/yt-converter
+yt-converter-server/server

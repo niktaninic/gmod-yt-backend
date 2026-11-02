@@ -1245,6 +1245,21 @@ function CLASS:StartConnectingProcess(streamTaskUid, nodownload)
 			return
 		end
 
+		-- seed the entity playlist BEFORE the BASS check: the playlist lives on
+		-- the server (ENT:SetPlaylist is server-only) and servers usually have
+		-- no gm_bass3, so seeding after that check never happened
+		if success and SERVER and playlistData and istable(playlistData.tracks) and #playlistData.tracks > 0 then
+			local ent = self:GetEntity()
+			if IsValid(ent) and ent.SetPlaylist then
+				ent:SetPlaylist(playlistData.tracks, playlistData.currentIndex or 1)
+
+				-- playlist mode drives auto-next on track end
+				if ent.SetPlaybackLoopMode then
+					ent:SetPlaybackLoopMode(StreamRadioLib.PLAYBACK_LOOP_MODE_PLAYLIST)
+				end
+			end
+		end
+
 		if not self.State.HasBass and SERVER then
 			self:AcceptError(LIBError.STREAM_ERROR_MISSING_GM_BASS3)
 			return
@@ -1263,19 +1278,6 @@ function CLASS:StartConnectingProcess(streamTaskUid, nodownload)
 		if not success then
 			self:AcceptError(errorcode)
 			return
-		end
-
-		-- seed entity playlist only after confirming success and bass availability
-		if playlistData and istable(playlistData.tracks) and #playlistData.tracks > 0 then
-			local ent = self:GetEntity()
-			if IsValid(ent) and ent.SetPlaylist then
-				ent:SetPlaylist(playlistData.tracks, playlistData.currentIndex or 1)
-
-				-- playlist mode drives auto-next on track end
-				if ent.SetPlaybackLoopMode then
-					ent:SetPlaybackLoopMode(StreamRadioLib.PLAYBACK_LOOP_MODE_PLAYLIST)
-				end
-			end
 		end
 
 		self:IsAllowedUrlPair(externalUrl, internalUrl, function(this, allowed, blockErrorCode)

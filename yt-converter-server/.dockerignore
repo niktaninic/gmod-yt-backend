@@ -1,6 +1,11 @@
-node_modules/
+.git
+.env
+.env.*
+!.env.example
 data/
 cache/
 cookies/
-.env
 *.mp3
+*.md
+Dockerfile
+docker-compose.yml

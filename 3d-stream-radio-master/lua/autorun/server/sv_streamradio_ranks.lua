@@ -60,7 +60,6 @@ local function PushRanks()
 	local key = table.concat(ranks, ",")
 
 	if key == _lastSentKey then return end
-	_lastSentKey = key
 
 	local body = util.TableToJSON({ ranks = ranks })
 	local headers = { ["Content-Type"] = "application/json" }
@@ -77,7 +76,10 @@ local function PushRanks()
 		success = function(code, respBody)
 			if code ~= 200 then
 				MsgN("[StreamRadio Ranks] push failed: HTTP ", code, " — ", respBody or "")
+				return
 			end
+			-- only remember after the backend accepted it, so failed pushes get retried
+			_lastSentKey = key
 		end,
 		failed = function(reason)
 			MsgN("[StreamRadio Ranks] push failed: ", reason or "unknown")
