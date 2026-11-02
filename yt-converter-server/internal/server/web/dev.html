@@ -312,7 +312,7 @@ input.dev-input:focus { border-color: var(--green); }
 </div>
 
 <script>
-const token = new URLSearchParams(location.search).get('token') || '';
+const token = '';
 
 document.querySelectorAll('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
@@ -340,7 +340,13 @@ async function apiFetch(url) {
 }
 
 function esc(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+// value used as a JS string argument inside an inline on*="" handler.
+// esc() alone is not enough there: the browser HTML-decodes the attribute
+// before running it, so a nick like  x');alert(1);('  escaped the string.
+function jsArg(s) {
+  return esc(JSON.stringify(String(s)));
 }
 function fmtDur(s) {
   if (!s || s < 0) return '--';
@@ -441,9 +447,9 @@ function _redrawRankTable() {
     var dailyLabel = lim.dailyConversions >= 0 ? lim.dailyConversions : '∞';
     return '<tr id="rank-row-' + esc(rank) + '">' +
       '<td class="tag-cyan">' + esc(rank) + '</td>' +
-      '<td><input class="dev-input" style="width:90px;" id="rank-dur-' + esc(rank) + '" value="' + lim.maxDurationSeconds + '" oninput="_markRankDirty(\'' + esc(rank) + '\')" /></td>' +
-      '<td><input class="dev-input" style="width:90px;" id="rank-daily-' + esc(rank) + '" value="' + lim.dailyConversions + '" oninput="_markRankDirty(\'' + esc(rank) + '\')" /></td>' +
-      '<td><button class="danger" style="padding:1px 7px; font-size:11px;" onclick="deleteRank(\'' + esc(rank) + '\')">del</button></td>' +
+      '<td><input class="dev-input" style="width:90px;" id="rank-dur-' + esc(rank) + '" value="' + lim.maxDurationSeconds + '" oninput="_markRankDirty(' + jsArg(rank) + ')" /></td>' +
+      '<td><input class="dev-input" style="width:90px;" id="rank-daily-' + esc(rank) + '" value="' + lim.dailyConversions + '" oninput="_markRankDirty(' + jsArg(rank) + ')" /></td>' +
+      '<td><button class="danger" style="padding:1px 7px; font-size:11px;" onclick="deleteRank(' + jsArg(rank) + ')">del</button></td>' +
       '</tr>';
   });
 
@@ -453,7 +459,7 @@ function _redrawRankTable() {
       '<td class="tag-dim">' + esc(rank) + '</td>' +
       '<td class="tag-dim" style="letter-spacing:0;">&#8734;</td>' +
       '<td class="tag-dim" style="letter-spacing:0;">&#8734;</td>' +
-      '<td><button style="padding:1px 7px; font-size:11px;" onclick="restrictRank(\'' + esc(rank) + '\')">Restrict</button></td>' +
+      '<td><button style="padding:1px 7px; font-size:11px;" onclick="restrictRank(' + jsArg(rank) + ')">Restrict</button></td>' +
       '</tr>';
   }));
 
@@ -583,10 +589,10 @@ async function loadPlayers() {
       var dailyColor = dailyLimit ? (daily >= dailyLimit ? 'var(--red)' : daily >= dailyLimit * 0.8 ? 'var(--yellow)' : 'var(--text)') : 'var(--text)';
       var dailyStr = dailyLimit ? daily + ' / ' + dailyLimit : (daily || '0');
       var blockBtn = p.steamid
-        ? '<button class="danger" style="padding:1px 5px; font-size:11px;" onclick="quickBlock(\'' + esc(p.steamid) + '\',\'' + esc(p.nick||'') + '\')">Block</button>'
+        ? '<button class="danger" style="padding:1px 5px; font-size:11px;" onclick="quickBlock(' + jsArg(p.steamid) + ',' + jsArg(p.nick||'') + ')">Block</button>'
         : '';
       var deleteBtn = p.steamid
-        ? '<button class="danger" style="padding:1px 5px; font-size:11px;" onclick="deletePlayer(\'' + esc(p.steamid) + '\',\'' + esc(p.nick||'') + '\')">Del</button>'
+        ? '<button class="danger" style="padding:1px 5px; font-size:11px;" onclick="deletePlayer(' + jsArg(p.steamid) + ',' + jsArg(p.nick||'') + ')">Del</button>'
         : '';
       return '<tr>' +
         '<td class="tag-dim">' + (i+1) + '</td>' +
@@ -619,7 +625,7 @@ async function loadBlockedPlayers() {
         '<td class="tag-red">' + esc(p.steamid) + '</td>' +
         '<td class="tag-dim">' + esc(p.reason || '--') + '</td>' +
         '<td class="tag-dim" style="font-size:11px;">' + fmtDate(p.blocked_at) + '</td>' +
-        '<td><button class="danger" style="padding:1px 5px; font-size:11px;" onclick="unblockPlayer(\'' + esc(p.steamid) + '\')">Unblock</button></td>' +
+        '<td><button class="danger" style="padding:1px 5px; font-size:11px;" onclick="unblockPlayer(' + jsArg(p.steamid) + ')">Unblock</button></td>' +
         '</tr>';
     }).join('');
   } catch(e) {
@@ -699,7 +705,7 @@ async function loadCache() {
         '<td class="file-size">' + fmtSize(e.file_size) + '</td>' +
         '<td class="tag-dim" style="font-size:11px;">' + fmtDate(e.created_at) + '</td>' +
         '<td class="' + (soon?'expire-soon':'tag-dim') + '" style="font-size:11px;">' + fmtDate(e.expires_at) + '</td>' +
-        '<td><button class="danger" style="padding:1px 7px; font-size:11px;" onclick="deleteCache(\'' + esc(e.video_id) + '\',this)">del</button></td>' +
+        '<td><button class="danger" style="padding:1px 7px; font-size:11px;" onclick="deleteCache(' + jsArg(e.video_id) + ',this)">del</button></td>' +
         '</tr>';
     }).join('');
   } catch(e) { tbody.innerHTML = '<tr><td colspan="7" class="tag-red" style="padding:8px;">' + esc(e.message) + '</td></tr>'; }
