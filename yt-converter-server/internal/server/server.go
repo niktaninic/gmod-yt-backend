@@ -76,6 +76,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/convert", s.withAuth(s.handleConvert))
 	mux.HandleFunc("POST /api/info", s.withAuth(s.handleInfo))
 	mux.HandleFunc("POST /api/playlist", s.withAuth(s.handlePlaylist))
+	mux.HandleFunc("POST /api/prefetch", s.withAuth(s.serverOnly(s.handlePrefetch)))
 	mux.HandleFunc("GET /api/history", s.withAuth(s.serverOnly(s.handleHistory)))
 	mux.HandleFunc("POST /api/ranks", s.withAuth(s.serverOnly(s.handleRanks)))
 	mux.HandleFunc("GET /api/health", s.handleHealth)

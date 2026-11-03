@@ -427,9 +427,11 @@ function SRC.NewResolver(name)
 		end, debugLog)
 	end
 
-	-- callback(ok, tracks, errId)
+	-- callback(ok, tracks, errId, startIndex)
+	-- the backend already drops entries the player can't play (too long for
+	-- their rank, deleted, private) and tells us where watch?v=X&list=Y starts
 	function r:FetchPlaylist(url, context, errs, debugLog, callback)
-		SRC.Post("/api/playlist", { url = url }, function(ok, rd, httpCode)
+		SRC.Post("/api/playlist", SRC.BuildBody(url, context), function(ok, rd, httpCode)
 			if not ok then
 				callback(false, nil, SRC.MapError(errs, httpCode, rd))
 				return
@@ -440,12 +442,38 @@ function SRC.NewResolver(name)
 				return
 			end
 
-			debugLog("playlist loaded: ", #rd.tracks, " tracks")
-			callback(true, rd.tracks, nil)
+			local start = math.Clamp(tonumber(rd.start_index) or 1, 1, #rd.tracks)
+			debugLog("playlist loaded: ", #rd.tracks, " tracks, ", tonumber(rd.skipped) or 0, " skipped, start at #", start)
+			callback(true, rd.tracks, nil, start)
 		end, debugLog)
 	end
 
 	return r
+end
+
+-- ---------------------------------------------------------------------------
+-- playlist helpers (server)
+-- ---------------------------------------------------------------------------
+
+-- errors that are specific to one track: a playlist should skip it.
+-- (unavailable / rate limited / blocked / daily limit would fail the next
+-- track too, so those stop the playlist instead of cascading through it)
+SRC._itemErrors = SRC._itemErrors or {}
+
+function SRC.IsItemError(errId)
+	return SRC._itemErrors[tonumber(errId) or -1] == true
+end
+
+function SRC.IsConverterURL(url)
+	url = string.lower(tostring(url or ""))
+	return string.find(url, "youtu", 1, true) ~= nil or string.find(url, "spotify", 1, true) ~= nil
+end
+
+-- asks the backend to convert a track in the background (next playlist
+-- item), so the switch is instant. Fire and forget, server only.
+function SRC.Prefetch(url, context)
+	if not SERVER or not SRC.IsConverterURL(url) then return end
+	SRC.Post("/api/prefetch", SRC.BuildBody(url, context), function() end, function() end)
 end
 
 -- registers the stream error codes shared by both interfaces
@@ -479,6 +507,10 @@ Server admin needs to:
 		{ errs.DAILY_LIMIT, "CONVERTER_DAILY_LIMIT", "Daily limit reached", "You reached the daily conversion limit of your rank.\nAlready converted tracks still play." },
 		{ errs.LIVE, "CONVERTER_LIVE", "Live streams are not supported", "Live streams can't be converted. Try a normal video." },
 	}
+
+	for _, id in ipairs({ errs.FAILED, errs.TOO_LONG, errs.INVALID_URL, errs.LIVE }) do
+		SRC._itemErrors[id] = true
+	end
 
 	for _, d in ipairs(defs) do
 		LIBError.AddStreamErrorCode({

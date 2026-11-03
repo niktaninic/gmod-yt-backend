@@ -96,7 +96,7 @@ end
 function RADIOIFACE:ConvertPlaylist(url, callback, context)
 	DebugLog("playlist: ", url)
 
-	g_resolver:FetchPlaylist(url, context, ERR, DebugLog, function(ok, tracks, errId)
+	g_resolver:FetchPlaylist(url, context, ERR, DebugLog, function(ok, tracks, errId, startIndex)
 		if not ok then
 			callback(self, false, nil, errId)
 			return
@@ -117,18 +117,30 @@ function RADIOIFACE:ConvertPlaylist(url, callback, context)
 			return
 		end
 
-		local first = items[1]
-		g_resolver:ConvertTrack(ExtractVideoId(first.url), first.url, context, ERR, DebugLog, function(ok2, streamUrl, errId2)
-			if not ok2 then
-				callback(self, false, nil, errId2)
-				return
-			end
+		-- if the first track fails for a track-specific reason (removed,
+		-- region locked, ...) try the next ones instead of failing the playlist
+		local function TryAt(index, attempt)
+			local item = items[index]
+			g_resolver:ConvertTrack(ExtractVideoId(item.url), item.url, context, ERR, DebugLog, function(ok2, streamUrl, errId2)
+				if not ok2 then
+					if attempt < 3 and #items > attempt and SRC.IsItemError(errId2) then
+						DebugLog("playlist item #", index, " failed, trying the next one")
+						TryAt(index % #items + 1, attempt + 1)
+						return
+					end
 
-			callback(self, true, streamUrl, nil, {
-				tracks = items,
-				currentIndex = 1,
-			})
-		end)
+					callback(self, false, nil, errId2)
+					return
+				end
+
+				callback(self, true, streamUrl, nil, {
+					tracks = items,
+					currentIndex = index,
+				})
+			end)
+		end
+
+		TryAt(math.Clamp(startIndex or 1, 1, #items), 1)
 	end)
 end
 

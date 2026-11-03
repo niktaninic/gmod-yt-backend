@@ -124,11 +124,33 @@ metadata only: `source, video_id|track_id, title, duration, duration_formatted, 
 
 ### `POST /api/playlist`
 
+body like `/api/convert` (`url` + optional player fields, used for the rank's length limit).
+
 ```json
-{ "source": "youtube", "playlist_id": "PL…", "tracks": [ { "url": "…", "video_id": "…", "title": "…", "duration": 213 } ] }
+{ "source": "youtube", "playlist_id": "PL…", "start_index": 4, "skipped": 2,
+  "tracks": [ { "url": "…", "video_id": "…", "title": "…", "duration": 213 } ] }
 ```
 
-capped at `MAX_PLAYLIST_ITEMS`, cached for 10 minutes.
+- capped at `MAX_PLAYLIST_ITEMS`, fetched once and cached for 10 minutes (every GMod client asks for it)
+- entries the caller can't play are removed (`skipped`): longer than the rank allows, deleted, private
+- `start_index` (1-based): for `watch?v=X&list=Y` playback starts at video X, not at the first entry
+
+### `POST /api/prefetch` (server key)
+
+same body as `/api/convert`, answers `202` immediately and converts in the background, only when a
+worker is idle. The addon uses it to prepare the next playlist item, so track changes are instant.
+
+## playlists in GMod
+
+Paste a YouTube playlist (`/playlist?list=…`, `watch?v=…&list=…`, mixes) or a Spotify playlist URL
+into the radio:
+
+1. the first playable track starts playing, the rest becomes the radio's playlist
+   (back/next buttons, Wire `Play Next`/`Play Previous`, loop mode "playlist")
+2. while a track plays, the server asks the backend to convert the next one
+3. a track that can't be played (removed, region locked, too long, live) is skipped automatically;
+   after 10 failures in a row (or one full round) the playlist stops instead of spinning
+4. if the very first track fails, the next ones are tried before giving up
 
 ### `GET|HEAD /stream/:videoId.mp3`
 

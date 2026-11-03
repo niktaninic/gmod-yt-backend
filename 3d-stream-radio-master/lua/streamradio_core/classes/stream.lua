@@ -1260,6 +1260,14 @@ function CLASS:StartConnectingProcess(streamTaskUid, nodownload)
 			end
 		end
 
+		-- let the entity react (prefetch next playlist item / skip broken ones)
+		if SERVER then
+			local ent = self:GetEntity()
+			if IsValid(ent) and ent.OnStreamConverted then
+				ent:OnStreamConverted(success, errorcode, context)
+			end
+		end
+
 		if not self.State.HasBass and SERVER then
 			self:AcceptError(LIBError.STREAM_ERROR_MISSING_GM_BASS3)
 			return

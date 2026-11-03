@@ -793,6 +793,49 @@ function ENT:SyncPlaylistState()
 	self.GUI_Main:SetHasPlaylist(hasPlaylist)
 end
 
+-- Called on the server after the stream URL went through an interface's
+-- Convert (streamradio_core/classes/stream.lua). For YouTube/Spotify playlists:
+--   * success -> ask the converter to prepare the next item in the background
+--   * track-specific failure (too long, removed, live, ...) -> skip to the next
+--     item instead of stopping the whole playlist
+function ENT:OnStreamConverted(success, errorcode, context)
+	if CLIENT then return end
+
+	local SRC = StreamRadioConverter
+	if not istable(SRC) then return end
+	if not self:HasPlaylistInternal() then return end
+
+	if self.GetMasterRadioRecursive and self:GetMasterRadioRecursive() then return end
+	if self.GetPlaybackLoopMode and self:GetPlaybackLoopMode() ~= StreamRadioLib.PLAYBACK_LOOP_MODE_PLAYLIST then return end
+
+	local playlistObj = self.PlaylistData
+	local data = playlistObj.data
+	local len = #data
+	if len <= 1 then return end
+
+	if success then
+		self._playlistFailStreak = 0
+
+		local nextItem = data[(playlistObj.pos or 1) % len + 1]
+		if nextItem then
+			SRC.Prefetch(nextItem.url, context)
+		end
+		return
+	end
+
+	if not SRC.IsItemError(errorcode) then return end
+
+	-- don't spin forever through a playlist where nothing plays
+	self._playlistFailStreak = (self._playlistFailStreak or 0) + 1
+	if self._playlistFailStreak >= math.min(len, 10) then return end
+
+	timer.Simple(1, function()
+		if not IsValid(self) then return end
+		self._nextPlaylistSwitch = nil
+		self:PlayNextPlaylistItem()
+	end)
+end
+
 function ENT:PlayPreviousPlaylistItem()
 	if CLIENT then return end
 

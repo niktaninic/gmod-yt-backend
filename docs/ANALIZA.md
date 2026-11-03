@@ -41,6 +41,17 @@ Poniżej lista błędów znalezionych w poprzedniej wersji (backend + pliki Lua)
 | 27 | Lua: wpis „konwersja w toku” bez limitu czasu – jeśli żądanie się zawiesiło, dany film był zablokowany do restartu. | Wpis traci ważność po 180 s. |
 | 28 | Nowe formaty linków nieobsługiwane: `/shorts/`, `/live/`, `youtube-nocookie`. | Dodane (backend + Lua). Live streamy odrzucane z czytelnym błędem. |
 
+## Playlisty
+
+| # | Problem | Naprawa |
+|---|---|---|
+| P1 | Playlista nigdy się nie wypełniała na serwerach bez gm_bass3 (patrz #21). | Wypełnianie przed sprawdzeniem BASS. |
+| P2 | Pierwszy za długi / usunięty / prywatny film w środku playlisty zatrzymywał radio (błąd strumienia nie przełącza na następny utwór). | Backend usuwa z listy pozycje, których gracz nie może odtworzyć (wg limitu rangi); dodatkowo serwer GMod automatycznie przeskakuje utwór, który nie przeszedł konwersji (max 10 pod rząd / jedno okrążenie). |
+| P3 | `watch?v=X&list=Y` zawsze zaczynało od pierwszej pozycji playlisty, a nie od klikniętego filmu. | Backend zwraca `start_index`, odtwarzanie zaczyna się od X. |
+| P4 | Jeśli pierwszy utwór się nie skonwertował, cała playlista kończyła się błędem. | Próba kolejnych pozycji (do 3). |
+| P5 | Każdy utwór był konwertowany dopiero po zakończeniu poprzedniego → kilkanaście sekund ciszy między utworami. | Serwer zleca w tle konwersję następnej pozycji (`/api/prefetch`, tylko przy wolnym workerze). |
+| P6 | Każdy klient osobno pobierał tę samą playlistę przez yt-dlp. | Cache 10 min + jedno pobranie dla równoczesnych żądań. |
+
 ## Wydajność
 
 | # | Było | Jest |

@@ -68,6 +68,7 @@ type caller struct {
 	playerIP string
 	ip       string
 	limits   config.Effective
+	prefetch bool
 }
 
 func (s *Server) newCaller(id identity, req convertRequest, ip string) caller {
@@ -364,7 +365,7 @@ func (s *Server) handleConvert(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "Invalid JSON body")
 		return
 	}
-	status, body := s.doConvert(r.Context(), identityFrom(r), req, s.clientIP(r), func(string) {})
+	status, body := s.doConvert(r.Context(), identityFrom(r), req, s.clientIP(r), func(string) {}, false)
 	if ae, ok := body.(*apiError); ok {
 		if ae.retry > 0 {
 			writeRetryAfter(w, ae.retry)
@@ -377,10 +378,11 @@ func (s *Server) handleConvert(w http.ResponseWriter, r *http.Request) {
 
 // doConvert is shared by /api/convert, the dev console simulator and the
 // SSE test endpoint.
-func (s *Server) doConvert(ctx context.Context, id identity, req convertRequest, ip string, logf func(string)) (int, any) {
+func (s *Server) doConvert(ctx context.Context, id identity, req convertRequest, ip string, logf func(string), prefetch bool) (int, any) {
 	t0 := time.Now()
 	s.metrics.apiCalls.Add(1)
 	c := s.newCaller(id, req, ip)
+	c.prefetch = prefetch
 	url := strings.TrimSpace(req.URL)
 
 	fail := func(err error, videoID string) (int, any) {
@@ -480,6 +482,10 @@ func (s *Server) doConvert(ctx context.Context, id identity, req convertRequest,
 func (s *Server) finish(ctx context.Context, c caller, a audio, title, source, trackID string, fresh bool, t0 time.Time) (int, any) {
 	if title == "" {
 		title = a.Title
+	}
+	if c.prefetch && !fresh {
+		// already cached, nothing happened worth recording
+		return http.StatusOK, convertResponse{Success: true, StreamURL: "/stream/" + a.VideoID + ".mp3", VideoID: a.VideoID, Source: source, Title: title, Duration: a.Duration, Cached: true}
 	}
 	if err := s.store.AddHistory(ctx, store.HistoryEntry{
 		VideoID: a.VideoID, Title: title, Duration: a.Duration, Nick: c.nick, SteamID: c.steamID,
@@ -680,5 +686,75 @@ func (s *Server) handlePlaylist(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "PLAYLIST_FAILED", "Failed to fetch playlist")
 		return
 	}
-	writeJSON(w, http.StatusOK, res)
+
+	// drop entries this caller could never play, otherwise the radio stops
+	// in the middle of the playlist on the first too-long / deleted video
+	c := s.newCaller(id, req, s.clientIP(r))
+	tracks, skipped := filterPlaylist(res.Tracks, c.limits.MaxDurationSeconds)
+	if len(tracks) == 0 {
+		writeError(w, http.StatusBadRequest, "TOO_LONG", "No playable tracks in this playlist (all too long or unavailable)")
+		return
+	}
+
+	// start at the video the link points to (watch?v=X&list=Y), not at #1
+	start := 1
+	if vid := media.YouTubeVideoID(req.URL); vid != "" {
+		for i, t := range tracks {
+			if t.VideoID == vid {
+				start = i + 1
+				break
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"source":      res.Source,
+		"playlist_id": res.PlaylistID,
+		"tracks":      tracks,
+		"skipped":     skipped,
+		"start_index": start,
+	})
+}
+
+var unavailableTitles = map[string]bool{
+	"[Deleted video]": true, "[Private video]": true, "[Unavailable video]": true,
+}
+
+func filterPlaylist(in []playlistTrack, maxDur int) ([]playlistTrack, int) {
+	out := make([]playlistTrack, 0, len(in))
+	for _, t := range in {
+		if unavailableTitles[t.Title] {
+			continue
+		}
+		if maxDur > 0 && t.Duration > maxDur {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out, len(in) - len(out)
+}
+
+// handlePrefetch converts a track in the background so the next playlist
+// item starts instantly. Server key only; it only uses an idle worker and
+// never queues behind real requests.
+func (s *Server) handlePrefetch(w http.ResponseWriter, r *http.Request) {
+	var req convertRequest
+	if err := readJSON(w, r, &req); err != nil || strings.TrimSpace(req.URL) == "" {
+		writeError(w, http.StatusBadRequest, "INVALID_URL", `Missing "url" parameter`)
+		return
+	}
+	if s.yt.Active()+s.yt.Queued() >= s.cfg.MaxConcurrentConversions {
+		writeJSON(w, http.StatusAccepted, map[string]any{"success": true, "queued": false, "reason": "busy"})
+		return
+	}
+	id, ip := identityFrom(r), s.clientIP(r)
+	go func() {
+		ctx, cancel := context.WithTimeout(s.baseCtx, s.cfg.ConversionTimeout+time.Minute)
+		defer cancel()
+		status, body := s.doConvert(ctx, id, req, ip, func(string) {}, true)
+		if ae, ok := body.(*apiError); ok && status >= 500 {
+			slog.Debug("prefetch failed", "url", req.URL, "code", ae.code)
+		}
+	}()
+	writeJSON(w, http.StatusAccepted, map[string]any{"success": true, "queued": true})
 }

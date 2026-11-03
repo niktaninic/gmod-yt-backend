@@ -78,3 +78,19 @@ func TestLimiter(t *testing.T) {
 		t.Fatal("separate key denied")
 	}
 }
+
+func TestFilterPlaylist(t *testing.T) {
+	in := []playlistTrack{
+		{VideoID: "a", Title: "ok", Duration: 100},
+		{VideoID: "b", Title: "[Deleted video]"},
+		{VideoID: "c", Title: "long", Duration: 5000},
+		{VideoID: "d", Title: "unknown length", Duration: 0},
+	}
+	out, skipped := filterPlaylist(in, 600)
+	if len(out) != 2 || skipped != 2 || out[0].VideoID != "a" || out[1].VideoID != "d" {
+		t.Fatalf("got %+v skipped=%d", out, skipped)
+	}
+	if out, _ := filterPlaylist(in, 0); len(out) != 3 {
+		t.Fatalf("unlimited rank should keep long tracks, got %d", len(out))
+	}
+}

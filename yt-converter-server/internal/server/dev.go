@@ -468,7 +468,7 @@ func (s *Server) devConvertTest(w http.ResponseWriter, r *http.Request) {
 	logf("Timestamp: " + time.Now().UTC().Format(time.RFC3339))
 
 	t0 := time.Now()
-	status, body := s.doConvert(r.Context(), identity{server: true}, convertRequest{URL: raw, Rank: "dev-console"}, s.clientIP(r), logf)
+	status, body := s.doConvert(r.Context(), identity{server: true}, convertRequest{URL: raw, Rank: "dev-console"}, s.clientIP(r), logf, false)
 	if ae, ok := body.(*apiError); ok {
 		send("done", map[string]any{"ok": false, "error": ae.msg, "status": status})
 		return
@@ -486,7 +486,7 @@ func (s *Server) devSimulate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t0 := time.Now()
-	status, body := s.doConvert(r.Context(), identity{server: true}, req, s.clientIP(r), func(string) {})
+	status, body := s.doConvert(r.Context(), identity{server: true}, req, s.clientIP(r), func(string) {}, false)
 	var resp any = body
 	if ae, ok := body.(*apiError); ok {
 		resp = errorBody{Success: false, Error: ae.msg, Code: ae.code}
